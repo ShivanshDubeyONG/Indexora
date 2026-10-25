@@ -64,3 +64,49 @@ What invariants must be preserved by this decision? What are the trade-offs?
   specifically: ascending by distance, and tie-breaking by ascending `int64` ID.
 - **Tie-Breaking Rule:** When two vectors have identical distances to a query (e.g., identical vectors, symmetric coordinates, or numerical collision), the candidate with the smaller numerical ID must be ranked higher.
 - **Boundary Invariant:** Naive partial-selection functions such as NumPy's `np.argpartition` do not guarantee deterministic selection at the $k$-th rank boundary when ties exist. Indexora implementations must explicitly handle boundary ties so that exact search, IVF lists, and evaluation scripts yield bit-for-bit identical top-$k$ results across runs and platforms.
+
+---
+
+## ADR-0002: Phase 1 Top-k Query Contracts and SearchResult Type
+
+- **Status:** Accepted (API Contract Specification)
+- **Date:** 2026-10-25
+- **Decision Owner:** Human Owner (Approved Phase 1 Contracts)
+
+### 1. Context
+During the preparation of Phase 1 (Distance Kernels and Top-$k$ Selection), four operational behaviors required explicit project policies prior to human core implementation:
+1. Retrieval behavior when requested neighbor count $k$ exceeds database size $N$.
+2. Input validation policy for non-positive query limits ($k \le 0$).
+3. Type safety policy when vector inputs have dtypes other than `float32`.
+4. Return container structure for top-$k$ selection and nearest-neighbor search.
+
+These decisions define design-time API contracts and test specifications. They do not represent already-implemented code.
+
+### 2. Decisions
+
+1. **Oversized Neighbor Queries ($k > N$):**
+   - When $k > N$, the search operation returns all $N$ available records sorted by ascending `(distance, ID)`.
+   - The engine must not raise an error, crash, or pad the output with sentinel/dummy IDs.
+   - *Rationale:* Aligns with standard information retrieval semantics and industry references (FAISS, scikit-learn).
+
+2. **Non-Positive Neighbor Count ($k \le 0$):**
+   - If $k \le 0$, `select_top_k` must raise a `ValueError("k must be positive")`.
+   - Searching for zero or negative nearest neighbors is an invalid query operation.
+   - *Open Decision Note:* The project documents do not specify behavior for non-integer $k$ values (e.g. `float`, `str`, `None`); this remains an unresolved owner decision.
+
+3. **Strict Vector Dtype Enforcement (No Silent Casting):**
+   - Distance kernels and search functions must require `np.float32` inputs.
+   - Non-`float32` arrays (such as `float64`, `int32`, `int64`) must be rejected by raising `TypeError` or `ValueError`.
+   - *Rationale:* Preserves SRS design principle "No hidden preprocessing". Silent promotion to `float64` doubles memory bandwidth and cache pressure; silent downcasting masks precision loss. Callers must explicitly cast their data if necessary.
+
+4. **Structured Return Object (`SearchResult` for Top-$k$ Selection):**
+   - Top-$k$ selection (`select_top_k`) and subsequent search functions return a `SearchResult` container exposing named attributes:
+     - `.distances`: 1D (or 2D if batched) `np.ndarray` of `float32`.
+     - `.ids`: 1D (or 2D if batched) `np.ndarray` of `int64`.
+   - *API Separation:* Raw distance kernels (such as `pairwise_squared_l2_ref`) compute pairwise distances and return a NumPy array of `float32` distances. They do not return `SearchResult` and do not process IDs. `SearchResult` is exclusively produced by top-$k$ selection and search layers.
+   - *Rationale:* Plain tuples like `(distances, ids)` are error-prone during caller unpacking (risk of swapping indices vs distances). Named attributes provide type safety, self-documenting code, and clean indexing across all engine layers.
+
+### 3. Consequences & Invariants
+- These contracts define the acceptance interface for the upcoming Phase 1 implementation (to be implemented by the human owner).
+- Test specifications in `docs/phase1_test_spec.md` will verify adherence to these contracts once implemented.
+- The engine does not yet contain these implementations; when implemented, the distance kernel must return a NumPy `float32` array, and top-$k$ selection must explicitly validate `k >= 1`, validate `arr.dtype == np.float32` upon entry, and return a `SearchResult`.

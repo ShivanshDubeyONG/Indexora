@@ -118,40 +118,43 @@ The reference distance kernel is the **correctness oracle** for Indexora. Every 
 ### Contract Specification
 - **Function Concept:** `pairwise_squared_l2_ref(queries, database)`
 - **Inputs:**
-  - `queries`: 2D array of shape `(Q, d)` or 1D array of shape `(d,)`
-  - `database`: 2D array of shape `(N, d)`
-  - Data types: `float32` (or compatible floating point)
+  - `queries`: 2D array of shape `(Q, d)` or 1D array of shape `(d,)` with `dtype=float32`
+  - `database`: 2D array of shape `(N, d)` with `dtype=float32`
+  - Data types: `float32` strictly required; non-`float32` inputs rejected without silent casting (per ADR-0001 and ADR-0002).
 - **Outputs:**
-  - If batched: 2D array of shape `(Q, N)` with `dtype=float32` (or `float64` accumulator downcast)
-  - If single query: 1D array of shape `(N,)`
+  - If batched: 2D array of shape `(Q, N)` with `dtype=float32`
+  - If single query: 1D array of shape `(N,)` with `dtype=float32`
+  - Accumulation: Direct coordinate differences with careful accumulation (for example, `float64` intermediate accumulation during summation for supported sizes as noted in Technical Design Section 4, stored as `float32` output).
 - **Validation & Error Handling:**
   - Dimension mismatch ($d_q \ne d_{db}$): Must raise `ValueError`.
   - Non-2D shapes (or improper dimensionalities): Must raise `ValueError`.
-  - Empty database ($N = 0$): Return empty distance array of shape `(Q, 0)`.
-  - Non-finite values (`NaN`, `Inf`): Must reject or handle cleanly as specified.
+  - Non-`float32` dtype: Must raise `TypeError` or `ValueError` (no silent casting).
+  - Empty database ($N = 0$): Return empty distance array of shape `(Q, 0)` with `dtype=float32`.
+  - Non-finite values (`NaN`, `Inf`): Must raise `ValueError` on validation.
 
 ### Reference Kernel Pseudocode
 ```text
 FUNCTION pairwise_squared_l2_ref(Q, X):
     VALIDATE Q is 2D and X is 2D
     VALIDATE Q.dimension == X.dimension
+    VALIDATE Q.dtype is float32 and X.dtype is float32
     VALIDATE all values in Q and X are finite
 
     LET num_queries = Q.shape[0]
     LET num_vectors = X.shape[0]
     LET d = Q.shape[1]
 
-    INITIALIZE distances matrix D of shape (num_queries, num_vectors) with zeros (float64 precision)
+    INITIALIZE distances matrix D of shape (num_queries, num_vectors) with dtype float32
 
     FOR q FROM 0 TO num_queries - 1:
         FOR i FROM 0 TO num_vectors - 1:
-            LET sum_sq = 0.0 (float64)
+            LET sum_sq = 0.0 (float64 accumulator to reduce intermediate round-off)
             FOR j FROM 0 TO d - 1:
                 LET diff = float64(Q[q, j]) - float64(X[i, j])
                 sum_sq = sum_sq + diff * diff
-            D[q, i] = sum_sq
+            D[q, i] = float32(sum_sq)
 
-    RETURN D cast to float32
+    RETURN D
 ```
 
 ---
@@ -167,10 +170,18 @@ NumPy provides `np.argpartition(distances, kth=k-1)`, which uses Introselect to 
 2. **Critical Flaw at Tie Boundaries:** If multiple items have the exact same distance as the item at index $k-1$, `argpartition` makes an arbitrary choice about which of those tied items is included in the partition and which is left out.
 
 ### The Deterministic Top-$k$ Invariant
+
 To ensure strict reproducibility:
 1. If $k \ge N$, return all $N$ items sorted by `(distance, ID)`.
 2. When performing partial selection, any candidate whose distance equals the boundary distance must be inspected and tie-broken by ID before finalizing the top $k$.
 3. The final returned array must be sorted in strictly ascending `(distance, ID)` order.
+
+### Return Type Separation: Distance Arrays vs `SearchResult`
+
+It is critical to distinguish between the outputs of the two components:
+
+- **Distance Kernel (`pairwise_squared_l2_ref`):** Calculates pairwise geometric distances and returns a standard NumPy `float32` array of shape `(Q, N)` (or `(N,)` for a single query). It computes distances only; it does not take IDs, sort results, or produce `SearchResult` objects.
+- **Top-$k$ Selector (`select_top_k`):** Consumes distance arrays and stable `int64` IDs, enforces tie-breaking and bounds validation ($k \ge 1$), and returns a typed `SearchResult` container with named attributes `.distances` (`np.ndarray`, `float32`) and `.ids` (`np.ndarray`, `int64`), per ADR-0002.
 
 ---
 
@@ -179,11 +190,13 @@ To ensure strict reproducibility:
 Try solving these five exercises on paper or in a scratch script before checking the Answer Key at the end of this document.
 
 ### Exercise 1: Manual Distance and Symmetry
+
 Given $q = [2.0, 3.0, -1.0]$ and $x = [-1.0, 3.0, 3.0]$:
 1. Compute the squared Euclidean distance $d^2(q, x)$ by hand.
 2. Does $d^2(q, x) = d^2(x, q)$ always hold for squared-$L_2$? Why?
 
 ### Exercise 2: The Fast Kernel Cancellation Trap
+
 A popular formula for fast distance computation via matrix multiplication is:
 $$\|q - x\|^2 = \|q\|^2 - 2 q^T x + \|x\|^2$$
 Consider $q = [1000.0, 1000.0]$ and $x = [1000.0, 1000.001]$:
@@ -191,21 +204,26 @@ Consider $q = [1000.0, 1000.0]$ and $x = [1000.0, 1000.001]$:
 2. What happens in standard single-precision `float32` if $\|q\|^2$ and $\|x\|^2$ are large numbers ($\approx 2 \times 10^6$) and we subtract $2 q^T x$? Can the result become negative?
 
 ### Exercise 3: Boundary Ties in `argpartition`
+
 Suppose an array of 5 distances is `[4.0, 2.0, 2.0, 2.0, 5.0]` with IDs `[10, 20, 30, 40, 50]`.
 We request $k = 2$.
+
 1. What is the boundary distance at rank $k$?
 2. Which IDs are tied at that boundary distance?
 3. Which IDs should be selected under the `(distance, ID)` rule?
 
 ### Exercise 4: Top-$k$ Parameter Edge Cases
+
 How should your top-$k$ selector handle:
+
 1. $k > N$ (e.g., $k = 10$, but the database only has 3 vectors)?
-2. $k = 0$?
-3. $k < 0$?
-4. $N = 0$ (empty database)?
+2. $k \le 0$ (e.g., $k = 0$ or $k = -1$)?
+3. $N = 0$ (empty database)?
 
 ### Exercise 5: Designing a Scalable Top-$k$ Strategy
+
 When $N = 100,000$ and $k = 10$:
+
 1. Why is sorting the entire dataset $\mathcal{O}(N \log N)$ inefficient?
 2. What are the advantages and disadvantages of:
    - Approach A: `np.argpartition` + boundary tie resolution + sorting top $k$.
@@ -221,7 +239,7 @@ Before marking Phase 1 complete, your implementation must satisfy the following 
 2. **Dimension Invariance:** Input shape validation rejects mismatched dimensions ($d_q \ne d_{db}$) and malformed inputs with descriptive `ValueError`.
 3. **Deterministic Tie-Breaking:** For identical vectors or equidistant points, output ordering strictly follows ascending `(distance, ID)`.
 4. **Boundary Ties:** Ties occurring exactly across the $k$-th selection boundary are resolved correctly according to the stable ID policy.
-5. **Edge Cases:** Clean, documented behavior for $k = 1$, $k = N$, $k > N$, and empty inputs.
+5. **Edge Cases:** Clean, documented behavior for $k = 1$, $k = N$, $k > N$, $k \le 0$ raising `ValueError("k must be positive")`, and empty inputs.
 6. **Isolation:** Reference kernel operates without external library dependencies (only NumPy).
 
 ---
@@ -229,6 +247,7 @@ Before marking Phase 1 complete, your implementation must satisfy the following 
 ## Answer Key for Learning Exercises
 
 ### Answer 1
+
 1. Difference:
    - Component 0: $(2.0 - (-1.0)) = 3.0 \implies 3.0^2 = 9.0$
    - Component 1: $(3.0 - 3.0) = 0.0 \implies 0.0^2 = 0.0$
@@ -237,11 +256,13 @@ Before marking Phase 1 complete, your implementation must satisfy the following 
 2. Yes, symmetry always holds because $(q_j - x_j)^2 = (-(x_j - q_j))^2 = (x_j - q_j)^2$.
 
 ### Answer 2
+
 1. Exact calculation:
    $0^2 + (-0.001)^2 = 0.000001 = 1.0 \times 10^{-6}$.
 2. In single precision `float32`, $\|q\|^2 = 1000^2 + 1000^2 = 2{,}000{,}000$. Single precision only provides $\approx 7$ decimal digits of mantissa precision. When subtracting two numbers around $4 \times 10^6$ to compute a residual of $10^{-6}$, severe **catastrophic cancellation** occurs. The computed value can easily become $-0.0001$ or slightly negative. That is why fast BLAS kernels must clamp small negative numbers to zero and must be verified against the reference kernel oracle!
 
 ### Answer 3
+
 1. The distances are sorted: 2.0, 2.0, 2.0, 4.0, 5.0. For $k = 2$, the boundary distance is `2.0`.
 2. IDs 20, 30, and 40 are all tied at distance `2.0`.
 3. Under ascending `(distance, ID)` ordering:
@@ -250,12 +271,13 @@ Before marking Phase 1 complete, your implementation must satisfy the following 
    Therefore, IDs `[20, 30]` must be returned.
 
 ### Answer 4
+
 1. When $k > N$: Return all $N$ available items in sorted order (do not crash or pad with invalid IDs).
-2. When $k = 0$: Return empty result arrays (0 items).
-3. When $k < 0$: Raise a `ValueError("k must be non-negative")`.
-4. When $N = 0$: Return empty result arrays.
+2. When $k \le 0$: Raise a `ValueError("k must be positive")` per ADR-0002.
+3. When $N = 0$: Return empty `SearchResult` with empty distance and ID arrays.
 
 ### Answer 5
+
 1. Sorting $100,000$ items takes $\approx 100,000 \times \log_2(100,000) \approx 1.66 \times 10^6$ operations. Only 10 items are needed, so $99.99\%$ of the sorting work is discarded.
 2. **Comparison:**
    - **Approach A (`argpartition`):** $\mathcal{O}(N)$ selection in vectorized C/NumPy code. Extremely fast in NumPy, but requires careful handling of boundary ties if multiple items match the boundary value.
