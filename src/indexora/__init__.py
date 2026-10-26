@@ -1,5 +1,14 @@
 """Indexora: A learning-first vector search engine built from scratch in Python and NumPy."""
 
+from indexora.data import (
+    ClusteredDataset,
+    VectorDataset,
+    generate_clustered_dataset,
+    generate_synthetic_dataset,
+    load_dataset,
+    normalize_l2,
+    save_dataset,
+)
 from indexora.exact import ExactFlatIndex, exact_search, generate_ground_truth
 from indexora.kernels import pairwise_squared_l2_ref
 from indexora.topk import SearchResult, select_top_k
@@ -14,4 +23,11 @@ __all__ = [
     "ExactFlatIndex",
     "exact_search",
     "generate_ground_truth",
+    "VectorDataset",
+    "ClusteredDataset",
+    "generate_synthetic_dataset",
+    "generate_clustered_dataset",
+    "normalize_l2",
+    "save_dataset",
+    "load_dataset",
 ]

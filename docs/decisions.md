@@ -153,3 +153,47 @@ Phase 2 establishes the exact search baseline and ground-truth generation mechan
 - All subsequent ANN algorithms (IVF-Flat, PQ, HNSW) must benchmark Recall@k directly against `generate_ground_truth`.
 - When IVF-Flat probes every populated inverted list, its output must agree bit-for-bit with `exact_search` under identical composite key ordering.
 - Buffer borrowing in `ExactFlatIndex` preserves single-allocation memory efficiency across benchmarks while making mutation caller-responsible.
+
+---
+
+## ADR-0004: Phase 3 Dataset Representation, Normalization, and Caching Contracts
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Decision Owner:** Agent-assisted (Phase 3 Utilities)
+
+### 1. Context
+Phase 3 introduces the vector data layer needed to supply benchmark vectors, evaluation splits, and training data to upcoming clustering (Phase 4) and indexing (Phase 5) algorithms. This ADR formalizes dataset split representations, strict C-contiguity enforcement, explicit cosine/unit normalization with a zero-vector policy, and offline cache integrity.
+
+### 2. Decisions
+
+1. **Structured Dataset Representation (`VectorDataset`):**
+   - Datasets are represented by the immutable `VectorDataset` container managing:
+     - `base`: 2D `(N, d)` database vectors to index and search.
+     - `queries`: 2D `(Q, d)` evaluation queries.
+     - `train`: optional 2D `(T, d)` training vectors (e.g. for fitting k-means centroids or codebooks).
+     - `base_ids`, `query_ids`, `train_ids`: 1D `int64` durable identifiers matching split lengths with strictly unique values within each split.
+   - All vector arrays must strictly be C-contiguous `float32` arrays with finite values and identical dimensionality $d$.
+   - Empty splits ($N=0, Q=0, T=0$) with matching column dimensions are fully supported.
+
+2. **Explicit Cosine / L2 Unit-Normalization (`normalize_l2`):**
+   - Implements the required ADR-0001 explicit normalization utility:
+     $$\hat{v} = \frac{v}{\|v\|_2}$$
+   - **Zero-Vector Policy:**
+     - `zero_vector_policy="zero"` (default): Vectors with zero (or near-zero $\le 10^{-12}$) norm remain all zeros (`0.0`), preventing NaN poisoning or division-by-zero runtime warnings while maintaining valid float32 values.
+     - `zero_vector_policy="error"`: Raises `ValueError("Zero-norm vector encountered...")`.
+   - The engine performs no automatic or silent normalization during indexing or search.
+
+3. **Reproducible Clustered & Synthetic Generators:**
+   - `generate_synthetic_dataset`: Generates uniform/normal random splits with explicit seeds.
+   - `generate_clustered_dataset`: Generates vectors sampled around well-separated centroids with Gaussian noise, returning `ClusteredDataset` with ground-truth cluster labels (`base_labels`) and `centroids`.
+
+4. **Offline Cache & Checksum Integrity:**
+   - `save_dataset` and `load_dataset` serialize splits to standard NumPy `.npy` files with a `metadata.json` manifest.
+   - Every file's SHA-256 hexadecimal digest is computed and verified on load.
+   - Corrupted or tampered files are rejected immediately with descriptive `ValueError`.
+   - All dataset utilities and unit tests operate strictly offline without network calls.
+
+### 3. Consequences & Invariants
+- Clustering algorithms (k-means) and IVF-Flat can directly ingest `dataset.train` or `dataset.base` with guaranteed C-contiguity and type safety.
+- Ground-truth evaluation scripts can verify recall against `dataset.queries` and `dataset.base_ids`.
