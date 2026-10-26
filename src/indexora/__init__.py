@@ -1,5 +1,6 @@
 """Indexora: A learning-first vector search engine built from scratch in Python and NumPy."""
 
+from indexora.clustering import KMeansResult, kmeans, kmeans_plus_plus
 from indexora.data import (
     ClusteredDataset,
     VectorDataset,
@@ -30,4 +31,7 @@ __all__ = [
     "normalize_l2",
     "save_dataset",
     "load_dataset",
+    "KMeansResult",
+    "kmeans_plus_plus",
+    "kmeans",
 ]

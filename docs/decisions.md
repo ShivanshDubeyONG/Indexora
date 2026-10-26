@@ -197,3 +197,79 @@ Phase 3 introduces the vector data layer needed to supply benchmark vectors, eva
 ### 3. Consequences & Invariants
 - Clustering algorithms (k-means) and IVF-Flat can directly ingest `dataset.train` or `dataset.base` with guaranteed C-contiguity and type safety.
 - Ground-truth evaluation scripts can verify recall against `dataset.queries` and `dataset.base_ids`.
+
+---
+
+## ADR-0005: Phase 4 K-means Clustering and Centroid Initialization Contracts
+
+- **Status:** Proposed (Contract Specification for Human Core)
+- **Date:** 2026-10-26
+- **Decision Owner:** Human Core (Phase 4 Algorithm Ownership)
+
+### 1. Context
+Phase 4 introduces unsupervised vector partitioning via $k$-means clustering, which serves as the coarse codebook generator for IVF-Flat (Phase 5) and product quantization (Phase 8). Per `plan/implementation.md`, the core initialization ($k$-means++) and iteration loop (Lloyd's algorithm) are owned by the human author. This decision documents the public API contracts, array shapes, hyperparameters, empty-cluster policies, and mathematical invariants prior to human implementation.
+
+### 2. Decisions
+
+1. **Public API Signatures & Return Types:**
+   - Centroid initialization:
+     `kmeans_plus_plus(X: np.ndarray, k: int, seed: int | np.random.Generator | None = None) -> np.ndarray`
+     Returns `(k, d)` C-contiguous `float32` array of initial centroids.
+   - Lloyd clustering:
+     `kmeans(X: np.ndarray, k: int, max_iter: int = 100, tol: float = 1e-4, seed: int | np.random.Generator | None = None, empty_cluster_policy: str = "reseed_furthest") -> KMeansResult`
+     Returns an immutable `KMeansResult` dataclass with attributes:
+     - `.centroids`: `(k, d)` array (`np.float32`)
+     - `.labels`: `(N,)` array (`np.int64`), where each label $0 \le \text{label}[i] < k$
+     - `.inertia`: Python `float`, computed with `float64` accumulation
+     - `.n_iter`: `int`, count of executed Lloyd iterations
+     - `.converged`: `bool`, whether centroid movement stopped within `tol`
+     - `.inertia_history`: `tuple[float, ...]`, recorded inertia per completed iteration
+
+2. **Strict Vector Validation & Array Ownership:**
+   - Input matrix `X` must be a 2D NumPy array of shape `(N, d)` with strict `dtype=np.float32`, C-contiguous, and finite (`np.isfinite`). Silent type promotion or downcasting is prohibited.
+   - Matrix `X` is borrowed read-only; neither `kmeans_plus_plus` nor `kmeans` may mutate caller-owned buffers.
+   - Boundaries on $k$:
+     - $k < 1$ or non-integer $k$: raises `ValueError` / `TypeError`.
+     - $k > N$: raises `ValueError("k cannot exceed number of samples N")`.
+     - $k = N$: valid boundary where each sample is its own centroid with inertia $0.0$.
+
+3. **K-means++ Degenerate-Distance Fallback Policy:**
+   - For step $j \in \{1, \dots, k-1\}$, minimum squared distances $D(x_i)^2 = \min_{m < j} \|x_i - c_m\|_2^2$ are computed across all $N$ rows.
+   - **Standard Path ($\sum D(x_i)^2 > 0$):** Sample candidate index $i$ with probability $P(i) = D(x_i)^2 / \sum D(x)^2$. Any row identical to an already selected centroid has $D(x_i)^2 = 0$ and is never chosen.
+   - **Degenerate Path ($\sum D(x_i)^2 == 0$):** Occurs when all remaining points in $X$ are exact duplicates of already-selected centroids (or when all $N$ rows in $X$ are identical).
+     - The algorithm tracks the set of already-chosen row indices (`selected_indices`).
+     - If $\sum D^2 == 0$, candidate pool is restricted to unselected row indices:
+       $$\text{unselected} = \{i \in \{0, \dots, N-1\} \setminus \text{selected\_indices}\}$$
+     - Since $k \le N$, $|\text{unselected}| \ge 1$. The next centroid row index is sampled uniformly from $\text{unselected}$ using `rng.choice(unselected)`.
+     - *Invariant:* Guarantees that $k$ distinct row indices are selected from $X$ without duplicate index reuse when unselected rows remain, avoiding NaNs and infinite loops.
+
+4. **Deterministic Assignment & Tie-Breaking:**
+   - Pairwise distance between samples $X$ and candidate centroids $C$ is evaluated via squared Euclidean distance $\|x_i - c_j\|_2^2$ (compatible with `pairwise_squared_l2_ref`).
+   - Tie-breaking: If sample $x_i$ is equidistant from multiple centroids $j_1, j_2$ ($j_1 < j_2$), `np.argmin` deterministically assigns $x_i$ to the lower centroid index $j_1$.
+
+5. **Empty-Cluster Handling Policy (`reseed_furthest`):**
+   - Pathological data distributions or high $k$ relative to $N$ can produce empty clusters during Lloyd iterations ($|S_j| = 0$).
+   - Supported policies via `empty_cluster_policy`:
+     - `"reseed_furthest"` (default):
+       1. Identify candidate points: Find the vector $x_{i^*}$ currently assigned to a multi-point cluster ($|S| > 1$) with the maximum squared distance to its assigned centroid:
+          $$i^* = \arg\max_{i} \|x_i - c_{\text{labels}[i]}\|_2^2$$
+          (Ties broken by smallest index $i^*$; if multiple clusters are empty, candidates are assigned greedily by descending distance).
+       2. Reseed the empty centroid: Set $c_j = X[i^*]$.
+       3. Non-empty clusters update to the arithmetic mean of their assigned points.
+       4. Centroid shift evaluation includes the reseeded coordinate, driving $\|\Delta C\|_F^2 > 0$ to prevent premature false convergence.
+     - `"keep"`: Retains the centroid's coordinate from the previous iteration.
+     - `"error"`: Raises `RuntimeError` immediately upon detecting an empty cluster.
+
+6. **Convergence Criteria & Final Return Synchronization:**
+   - Convergence is achieved when the squared Frobenius norm of centroid shift across consecutive iterations satisfies:
+     $$\Delta C = \sum_{j=0}^{k-1} \|c_j^{(t)} - c_j^{(t-1)}\|_2^2 \le \text{tol}$$
+   - Inertia is defined as the total sum of squared distances to assigned centroids:
+     $$\text{Inertia} = \sum_{i=0}^{N-1} \|x_i - c_{\text{labels}[i]}\|_2^2$$
+   - **Final Synchronization Invariant:**
+     Upon loop termination (convergence or reaching `max_iter`), a final assignment pass over $X$ is executed using the final `centroids`:
+     $$\text{labels} = \arg\min_j \|x_i - c_j\|_2^2, \quad \text{inertia} = \sum_{i=0}^{N-1} \min_j \|x_i - c_j\|_2^2$$
+     This guarantees that `KMeansResult.labels`, `centroids`, and `inertia` are 100% mutually consistent, with `labels` strictly representing the nearest-centroid partition.
+
+### 3. Consequences & Invariants
+- Phase 5 (IVF-Flat) can train its coarse centroids directly using `kmeans(dataset.train or dataset.base, k=nlist, seed=seed)`.
+- Synthetic multi-cluster datasets (`generate_clustered_dataset`) can be used to mathematically verify that $k$-means converges cleanly on well-separated data.
