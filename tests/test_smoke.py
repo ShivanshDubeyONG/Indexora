@@ -24,3 +24,12 @@ def test_numpy_environment():
     vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     assert vec.dtype == np.float32
     assert vec.shape == (3,)
+
+
+def test_all_public_exports_accessible():
+    """Verify that every symbol listed in __all__ exists and is accessible from indexora."""
+    assert hasattr(indexora, "__all__")
+    for name in indexora.__all__:
+        assert hasattr(indexora, name), f"Missing public export: {name}"
+        obj = getattr(indexora, name)
+        assert obj is not None, f"Export {name} is None"

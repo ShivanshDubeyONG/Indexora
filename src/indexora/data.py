@@ -475,10 +475,10 @@ def load_dataset(
                     "Cache file is corrupted."
                 )
 
-    base = np.load(target_dir / "base.npy")
-    base_ids = np.load(target_dir / "base_ids.npy")
-    queries = np.load(target_dir / "queries.npy")
-    query_ids = np.load(target_dir / "query_ids.npy")
+    base = np.load(target_dir / "base.npy", allow_pickle=False)
+    base_ids = np.load(target_dir / "base_ids.npy", allow_pickle=False)
+    queries = np.load(target_dir / "queries.npy", allow_pickle=False)
+    query_ids = np.load(target_dir / "query_ids.npy", allow_pickle=False)
 
     train = None
     train_ids = None
@@ -486,8 +486,8 @@ def load_dataset(
     train_ids_path = target_dir / "train_ids.npy"
 
     if train_path.exists() and train_ids_path.exists():
-        train = np.load(train_path)
-        train_ids = np.load(train_ids_path)
+        train = np.load(train_path, allow_pickle=False)
+        train_ids = np.load(train_ids_path, allow_pickle=False)
 
     return VectorDataset(
         base=base,

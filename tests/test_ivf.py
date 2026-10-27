@@ -324,6 +324,7 @@ def test_ivf_flat_deterministic_equal_distance_tie_breaking() -> None:
     # Both must rank by ascending ID: 10, 20, 30
     np.testing.assert_array_equal(ivf_res.ids, np.array([10, 20, 30], dtype=np.int64))
     np.testing.assert_array_equal(ivf_res.ids, exact_res.ids)
+    np.testing.assert_allclose(ivf_res.distances, exact_res.distances, rtol=1e-5, atol=1e-5)
 
 
 def test_ivf_flat_all_probe_edge_cases_k_greater_than_n_and_empty_lists() -> None:
