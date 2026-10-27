@@ -88,6 +88,7 @@ These decisions define design-time API contracts and test specifications. They d
    - When $k > N$, the search operation returns all $N$ available records sorted by ascending `(distance, ID)`.
    - The engine must not raise an error, crash, or pad the output with sentinel/dummy IDs.
    - *Rationale:* Aligns with standard information retrieval semantics and industry references (FAISS, scikit-learn).
+   - *Scope and Approximate Batch Disambiguation:* This invariant strictly governs exact search and single-query search where the candidate pool is uniform and known. In approximate batched search (e.g. IVF-Flat), where individual queries in a batch may retrieve differing numbers of candidates ($N_{\text{cand}} < k$), the 2D rectangular array representation requires sentinel padding (`id = -1`, `distance = inf`) as formalized in ADR-0006.
 
 2. **Non-Positive Neighbor Count ($k \le 0$):**
    - If $k \le 0$, `select_top_k` must raise a `ValueError("k must be positive")`.
@@ -202,12 +203,12 @@ Phase 3 introduces the vector data layer needed to supply benchmark vectors, eva
 
 ## ADR-0005: Phase 4 K-means Clustering and Centroid Initialization Contracts
 
-- **Status:** Proposed (Contract Specification for Human Core)
+- **Status:** Accepted
 - **Date:** 2026-10-26
 - **Decision Owner:** Human Core (Phase 4 Algorithm Ownership)
 
 ### 1. Context
-Phase 4 introduces unsupervised vector partitioning via $k$-means clustering, which serves as the coarse codebook generator for IVF-Flat (Phase 5) and product quantization (Phase 8). Per `plan/implementation.md`, the core initialization ($k$-means++) and iteration loop (Lloyd's algorithm) are owned by the human author. This decision documents the public API contracts, array shapes, hyperparameters, empty-cluster policies, and mathematical invariants prior to human implementation.
+Phase 4 introduces unsupervised vector partitioning via $k$-means clustering, which serves as the coarse codebook generator for IVF-Flat (Phase 5) and product quantization (Phase 9). Per `plan/implementation.md`, the core initialization ($k$-means++) and iteration loop (Lloyd's algorithm) are owned by the human author. This decision documents the public API contracts, array shapes, hyperparameters, empty-cluster policies, and mathematical invariants prior to human implementation.
 
 ### 2. Decisions
 
@@ -278,7 +279,7 @@ Phase 4 introduces unsupervised vector partitioning via $k$-means clustering, wh
 
 ## ADR-0006: Phase 5 IVF-Flat Architecture, Inverted Lists, and Multi-Probe Search
 
-- **Status:** Proposed (Design & Contract Specification for Human Core)
+- **Status:** Accepted
 - **Date:** 2026-10-27
 - **Decision Owner:** Human Core (Phase 5 Algorithm Ownership)
 
@@ -325,6 +326,13 @@ Per `plan/implementation.md`, Phase 5 is designated **HUMAN CORE**. The core ind
         - Compute exact squared Euclidean distances between $q$ and $X_{\text{cand}}$ using `pairwise_squared_l2_ref`.
         - Rank candidate vectors and select top-$k$ using `select_top_k(distances, IDs_{\text{cand}}, k)`.
         - Result sorting and tie-breaking strictly adhere to ADR-0001: ascending by distance, breaking equal-distance ties by ascending `int64` ID.
+     5. **Batched Result Array Representation & Sentinel Padding:**
+        - Single queries (`queries.ndim == 1`) return a 1D `SearchResult` of length $\min(k, N_{\text{cand}})$ without padding.
+        - Batched queries (`queries.ndim == 2`) return 2D arrays of shape `(Q, \text{target\_k})` where $\text{target\_k} = \max_i (\text{len}(r_i))$.
+        - If individual queries retrieve differing numbers of candidates (e.g. when $N_{\text{cand}} < k$ for some queries), shorter rows are padded up to $\text{target\_k}$ with:
+          - Sentinel ID: `np.int64(-1)`
+          - Sentinel distance: `np.float32(np.inf)`
+        - *Evaluation Invariant:* Sentinel padding slots represent non-neighbors. All downstream evaluation routines (such as Recall@k or Precision@k) must strictly ignore ID `-1` and infinite distance, ensuring dummy IDs are never counted as ground-truth hits.
 
 5. **Decisive Acceptance Gate (All-Probe Equivalence):**
    - When $\text{nprobe} == \text{nlist}$, every inverted list is inspected.
@@ -336,3 +344,52 @@ Per `plan/implementation.md`, Phase 5 is designated **HUMAN CORE**. The core ind
 - Zero vector loss during partitioning; index validation guarantees memory safety and strict dtype enforcement (`float32` vectors, `int64` IDs).
 - Complete determinism across all queries and runs.
 - Clean foundation for Phase 6 benchmarking sweeps (`nprobe` vs. recall@k and latency).
+
+---
+
+## ADR-0007: Phase 6 Benchmark Harness v0.1 Architecture and Measurement Methodology
+
+- **Status:** Accepted
+- **Date:** 2026-10-27
+- **Decision Owner:** Agent-assisted (Phase 6 Benchmark Scaffolding)
+
+### 1. Context
+Phase 6 establishes Indexora's reproducible evaluation harness. In vector search engines, empirical measurements of recall, query latency, throughput (QPS), distance computations, build time, and memory footprint must be conducted under rigorous, scientific, and reproducible protocols. This decision records the evaluation methodology, metric definitions, sentinel exclusion invariants, timing policies, and machine-readable result schemas.
+
+### 2. Decisions
+
+1. **Ground-Truth Baseline Invariant:**
+   - Ground truth is generated strictly via `generate_ground_truth(dataset.queries, dataset.base, ids=dataset.base_ids, k=k)`.
+   - All approximate indexes (IVF-Flat, and future PQ/HNSW) are evaluated directly against this exact baseline under identical metrics and composite key ordering.
+
+2. **Empirical Recall@k and Sentinel Exclusion Invariant:**
+   - Recall@k measures the fraction of exact ground-truth nearest neighbors recovered by the candidate search:
+     $$\text{Recall}@k = \frac{1}{Q} \sum_{i=1}^Q \frac{|GT_i \cap R_{i, \text{valid}}|}{|GT_i|}$$
+     where $|GT_i| = \min(k, N)$.
+   - **Sentinel Exclusion Rule:** Sentinel padding slots (`id = -1`, `distance = inf`) introduced in batched IVF search to maintain rectangular array shapes are strictly filtered out before computing set intersections. Padded slots represent absent neighbors and must never match or inflate recall.
+
+3. **Distance Computations per Query:**
+   - Evaluated via `count_distance_computations(index, queries, nprobe=...)`:
+     - **Exact Flat:** Each query evaluates all $N$ database vectors: $\text{DC} = N$.
+     - **IVF-Flat:** Each query evaluates all $\text{nlist}$ coarse centroids, plus candidate vectors pooled from the nearest $P = \text{nprobe}$ inverted lists:
+       $$\text{DC} = \text{nlist} + \frac{1}{Q} \sum_{i=1}^Q \sum_{p=1}^{\text{nprobe}} |\text{invlists}[c_{i, p}]|$$
+
+4. **Timing Protocol & Latency Distribution:**
+   - High-resolution wall-clock timing is measured via `time.perf_counter()`.
+   - **Warmup:** Configurable warmup runs (default 1) execute without recording to prime CPU caches and JIT/bytecode compilation.
+   - **Repeated Runs:** Query batches are timed over multiple iterations (default 5).
+   - **Summary Statistics:** Reports p50 (median), p95, p99, mean, min, max, and throughput QPS ($\text{QPS} = Q / \text{mean\_batch\_time\_seconds}$).
+
+5. **Memory Accounting Separation:**
+   - Index build/training time is timed separately from query execution.
+   - Memory tracking records peak Python buffer allocations via `tracemalloc`. Documentation strictly separates Python-tracked buffer allocations from total OS process working set (`peak_wset`).
+
+6. **Reproducibility Schema & Manifests:**
+   - Benchmarks emit a machine-readable JSON manifest (`benchmark_results.json`) and a tabular CSV summary (`benchmark_summary.csv`).
+   - Recorded metadata includes: Python version, NumPy version, platform, architecture, processor, git commit hash, dataset parameters ($N, Q, d, \text{seed}$), and hyperparameter configs.
+   - Generates headline plots: Recall@k vs. p50 Latency and Recall@k vs. Distance Computations.
+
+### 3. Consequences & Invariants
+- Benchmarks are completely reproducible across environments using explicit random seeds.
+- The harness operates fully offline without downloading external assets or requiring mandatory heavy dependencies.
+- Serves as the acceptance gate for Phase 6 and provides the evaluation baseline for Phase 7 (reference adapters) and Phase 8 (hardware acceleration).

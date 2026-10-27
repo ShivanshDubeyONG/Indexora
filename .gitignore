@@ -36,6 +36,7 @@ htmlcov/
 
 # Generated benchmark results and artifacts
 benchmarks/results/
+benchmark_output/
 results/
 *.prof
 

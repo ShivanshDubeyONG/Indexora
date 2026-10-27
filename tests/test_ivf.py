@@ -435,7 +435,7 @@ def test_ivf_flat_partial_probe_recall_evaluation() -> None:
     total = 15 * 10
     for q_idx in range(15):
         true_set = set(exact_res.ids[q_idx])
-        retrieved_set = set(res_p1.ids[q_idx])
+        retrieved_set = {x for x in res_p1.ids[q_idx] if x != -1}
         matches_p1 += len(true_set.intersection(retrieved_set))
     recall_p1 = matches_p1 / total
     assert 0.0 <= recall_p1 <= 1.0
@@ -516,3 +516,164 @@ def test_ivf_flat_functional_api_and_list_inspection() -> None:
 
     with pytest.raises(TypeError, match="must be an IVFFlatIndex"):
         ivf_flat_search("not_an_index", queries)  # type: ignore
+
+
+def test_ivf_flat_batched_variable_candidate_sentinel_padding():
+    """Verify batched search pads uneven candidate counts with ID=-1 and dist=inf per ADR-0006."""
+    # Cluster 0: 1 point at [-10, -10]
+    # Cluster 1: 3 points near [10, 10]
+    # Cluster 2: 0 points (empty cluster, forced by predefined centroids)
+    centroids = np.array(
+        [
+            [-10.0, -10.0],
+            [10.0, 10.0],
+            [50.0, 50.0],  # No points will be closest to this centroid
+        ],
+        dtype=np.float32,
+    )
+    database = np.array(
+        [
+            [-10.0, -10.0],  # assigned to c0
+            [10.0, 10.0],    # assigned to c1
+            [10.1, 10.1],    # assigned to c1
+            [10.2, 10.2],    # assigned to c1
+        ],
+        dtype=np.float32,
+    )
+    ids = np.array([1001, 2001, 2002, 2003], dtype=np.int64)
+
+    index = IVFFlatIndex(database=database, nlist=3, ids=ids, centroids=centroids, nprobe=1)
+
+    # Query 0 probes c0 (1 candidate)
+    # Query 1 probes c1 (3 candidates)
+    # Query 2 probes c2 (0 candidates)
+    queries = np.array(
+        [
+            [-10.0, -10.0],
+            [10.0, 10.0],
+            [50.0, 50.0],
+        ],
+        dtype=np.float32,
+    )
+
+    k = 5
+    batch_res = index.search(queries, k=k, nprobe=1)
+
+    # Max retrieved across queries is 3 (from c1). Shape must be (3, 3)
+    assert batch_res.ids.shape == (3, 3)
+    assert batch_res.distances.shape == (3, 3)
+
+    # Query 0: 1 candidate [1001], followed by two sentinels (-1, inf)
+    assert batch_res.ids[0, 0] == 1001
+    assert batch_res.distances[0, 0] == 0.0
+    np.testing.assert_array_equal(batch_res.ids[0, 1:], np.array([-1, -1], dtype=np.int64))
+    np.testing.assert_array_equal(batch_res.distances[0, 1:], np.array([np.inf, np.inf], dtype=np.float32))
+
+    # Query 1: 3 candidates, zero sentinels
+    assert not np.any(batch_res.ids[1] == -1)
+    assert not np.any(np.isinf(batch_res.distances[1]))
+
+    # Query 2: 0 candidates, all three slots are sentinels (-1, inf)
+    np.testing.assert_array_equal(batch_res.ids[2], np.array([-1, -1, -1], dtype=np.int64))
+    np.testing.assert_array_equal(batch_res.distances[2], np.array([np.inf, np.inf, np.inf], dtype=np.float32))
+
+    # Single queries must NEVER contain padding per ADR-0002/ADR-0006
+    single_q0 = index.search(queries[0], k=k, nprobe=1)
+    assert len(single_q0.ids) == 1
+    assert single_q0.ids[0] == 1001
+
+    single_q2 = index.search(queries[2], k=k, nprobe=1)
+    assert len(single_q2.ids) == 0
+
+    # Downstream evaluation ignoring sentinel ID -1
+    true_neighbors_q0 = {1001}
+    retrieved_q0 = set(batch_res.ids[0][batch_res.ids[0] != -1])
+    assert retrieved_q0 == true_neighbors_q0
+
+
+def test_ivf_flat_all_probe_exact_equivalence_with_ties_and_custom_ids():
+    """Verify bit-for-bit equivalence in both IDs and distances when nprobe == nlist with equal-distance ties."""
+    database = np.array(
+        [
+            [1.0, 1.0],  # ID 50
+            [2.0, 2.0],  # ID 20 (tied with ID 10)
+            [2.0, 2.0],  # ID 10 (tied with ID 20)
+            [3.0, 3.0],  # ID 40
+            [4.0, 4.0],  # ID 30
+        ],
+        dtype=np.float32,
+    )
+    ids = np.array([50, 20, 10, 40, 30], dtype=np.int64)
+    query = np.array([[1.0, 1.0]], dtype=np.float32)
+
+    index = IVFFlatIndex(database=database, nlist=3, ids=ids, seed=42)
+    ivf_res = index.search(query, k=5, nprobe=3)
+    exact_res = exact_search(query, database, ids=ids, k=5)
+
+    np.testing.assert_array_equal(ivf_res.ids, exact_res.ids)
+    np.testing.assert_allclose(ivf_res.distances, exact_res.distances)
+
+
+def test_ivf_flat_recall_ignores_sentinel_padding_adversarial():
+    """Prove that sentinel padding (-1, inf) never inflates recall or counts as a valid match."""
+    # Database with 4 vectors total
+    db = np.array(
+        [[0.0, 0.0], [0.1, 0.1], [10.0, 10.0], [10.1, 10.1]], dtype=np.float32
+    )
+    ids = np.array([101, 102, 201, 202], dtype=np.int64)
+
+    # Coarse centroids separating into 2 clusters
+    centroids = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=np.float32)
+    index = IVFFlatIndex(database=db, nlist=2, ids=ids, centroids=centroids, nprobe=1)
+
+    queries = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=np.float32)
+    exact_res = exact_search(queries, db, ids=ids, k=4)
+
+    # Search with k=4, nprobe=1 -> each query probes only 1 cluster containing 2 points
+    # Output must have shape (2, 2) since both retrieve 2 points.
+    ivf_res = index.search(queries, k=4, nprobe=1)
+    assert ivf_res.ids.shape == (2, 2)
+
+    # Now test uneven batch: Query 0 probes 1 cluster (2 pts), Query 1 probes both clusters via forced assignment
+    # Or query near an empty/sparse cluster
+    # Even if k=10 is requested:
+    ivf_res_k10 = index.search(queries, k=10, nprobe=1)
+    # Both queries retrieved 2 candidates, so shape is (2, 2) without padding
+    assert ivf_res_k10.ids.shape == (2, 2)
+
+    # Construct an explicitly uneven cluster: Cluster 0 has 1 point, Cluster 1 has 3 points
+    c_uneven = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=np.float32)
+    db_uneven = np.array(
+        [[0.0, 0.0], [10.0, 10.0], [10.1, 10.1], [10.2, 10.2]], dtype=np.float32
+    )
+    ids_uneven = np.array([1, 2, 3, 4], dtype=np.int64)
+    idx_uneven = IVFFlatIndex(database=db_uneven, nlist=2, ids=ids_uneven, centroids=c_uneven, nprobe=1)
+
+    # Search batch of 2 queries with k=5:
+    # Query 0 retrieves 1 candidate [1] + 2 sentinels [-1, -1]
+    # Query 1 retrieves 3 candidates [2, 3, 4]
+    res_uneven = idx_uneven.search(queries, k=5, nprobe=1)
+    assert res_uneven.ids.shape == (2, 3)
+
+    # Exact ground truth has 4 items
+    gt = exact_search(queries, db_uneven, ids=ids_uneven, k=4)
+
+    # Calculate recall: sentinel -1 must NOT be counted as a hit
+    for i in range(2):
+        gt_set = set(gt.ids[i])
+        # Unfiltered retrieved set includes -1
+        raw_retrieved = set(res_uneven.ids[i])
+        # Filtered retrieved set excludes -1
+        clean_retrieved = {x for x in res_uneven.ids[i] if x != -1}
+
+        # Sentinel ID -1 cannot be in ground truth
+        assert -1 not in gt_set
+        # Intersection with cleaned set equals intersection with raw set (proof of non-inflation)
+        assert len(gt_set.intersection(clean_retrieved)) == len(gt_set.intersection(raw_retrieved))
+        # Valid retrieved count
+        if i == 0:
+            assert clean_retrieved == {1}
+            assert len(clean_retrieved) == 1
+        else:
+            assert clean_retrieved == {2, 3, 4}
+            assert len(clean_retrieved) == 3

@@ -338,3 +338,99 @@ def test_exact_flat_index_empty_database():
     res = idx.search(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), k=3)
     assert res.ids.shape == (0,)
     assert res.distances.shape == (0,)
+
+
+def test_exact_search_chunk_size_invariance():
+    """Verify exact_search produces bit-for-bit identical results across multiple chunk sizes."""
+    rng = np.random.default_rng(707)
+    N, d = 80, 8
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    ids = rng.permutation(np.arange(1000, 1000 + N, dtype=np.int64))
+
+    single_q = rng.standard_normal((d,)).astype(np.float32)
+    batch_q = rng.standard_normal((5, d)).astype(np.float32)
+
+    k = 10
+    baseline_single = exact_search(single_q, database, ids=ids, k=k, max_db_chunk=10000)
+    baseline_batch = exact_search(batch_q, database, ids=ids, k=k, max_db_chunk=10000)
+
+    for chunk_size in [1, 3, 7, 19, 40, 80]:
+        res_single = exact_search(single_q, database, ids=ids, k=k, max_db_chunk=chunk_size)
+        res_batch = exact_search(batch_q, database, ids=ids, k=k, max_db_chunk=chunk_size)
+
+        np.testing.assert_array_equal(res_single.ids, baseline_single.ids)
+        np.testing.assert_array_equal(res_single.distances, baseline_single.distances)
+
+        np.testing.assert_array_equal(res_batch.ids, baseline_batch.ids)
+        np.testing.assert_array_equal(res_batch.distances, baseline_batch.distances)
+
+
+def test_exact_search_incremental_equivalence_with_boundary_ties():
+    """Verify incremental merging preserves exact deterministic tie-breaking across chunk boundaries."""
+    # Place tied vectors across different blocks of size 2
+    database = np.array(
+        [
+            [1.0, 1.0],  # dist^2 = 0.0, ID 500 (block 0)
+            [2.0, 2.0],  # dist^2 = 2.0, ID 200 (block 0)
+            [2.0, 2.0],  # dist^2 = 2.0, ID 100 (block 1) - tied with above, smaller ID
+            [2.0, 2.0],  # dist^2 = 2.0, ID 300 (block 1) - tied with above
+            [5.0, 5.0],  # dist^2 = 32.0, ID 50 (block 2)
+        ],
+        dtype=np.float32,
+    )
+    ids = np.array([500, 200, 100, 300, 50], dtype=np.int64)
+    query = np.array([1.0, 1.0], dtype=np.float32)
+
+    # With k=3: should get ID 500 (dist 0), then among the 3 tied at dist 2.0, IDs 100 and 200
+    res_chunked = exact_search(query, database, ids=ids, k=3, max_db_chunk=2)
+    res_full = exact_search(query, database, ids=ids, k=3, max_db_chunk=10)
+
+    expected_ids = np.array([500, 100, 200], dtype=np.int64)
+    expected_dists = np.array([0.0, 2.0, 2.0], dtype=np.float32)
+
+    np.testing.assert_array_equal(res_chunked.ids, expected_ids)
+    np.testing.assert_array_equal(res_chunked.distances, expected_dists)
+    np.testing.assert_array_equal(res_chunked.ids, res_full.ids)
+    np.testing.assert_array_equal(res_chunked.distances, res_full.distances)
+
+
+def test_exact_search_max_db_chunk_validation():
+    """Verify validation on invalid max_db_chunk parameters."""
+    q = np.array([1.0, 2.0], dtype=np.float32)
+    db = np.array([[1.0, 2.0]], dtype=np.float32)
+
+    with pytest.raises(ValueError, match="max_db_chunk must be a positive integer"):
+        exact_search(q, db, max_db_chunk=0)
+
+    with pytest.raises(ValueError, match="max_db_chunk must be a positive integer"):
+        exact_search(q, db, max_db_chunk=-5)
+
+
+def test_exact_search_incremental_edge_cases_comprehensive():
+    """Verify incremental search on k > N, empty queries, non-sequential IDs, and chunk-spanning ties."""
+    rng = np.random.default_rng(808)
+    N, d = 25, 4
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    ids = rng.permutation(np.arange(100, 100 + N, dtype=np.int64))
+
+    # 1. k > N with small chunk size (max_db_chunk = 6)
+    k_oversized = 50
+    q_single = rng.standard_normal((d,)).astype(np.float32)
+    res_k_over = exact_search(q_single, database, ids=ids, k=k_oversized, max_db_chunk=6)
+    res_k_over_full = exact_search(q_single, database, ids=ids, k=k_oversized, max_db_chunk=1000)
+    assert len(res_k_over.ids) == N
+    np.testing.assert_array_equal(res_k_over.ids, res_k_over_full.ids)
+    np.testing.assert_allclose(res_k_over.distances, res_k_over_full.distances)
+
+    # 2. Empty queries with chunked database
+    empty_q = np.empty((0, d), dtype=np.float32)
+    res_empty_q = exact_search(empty_q, database, ids=ids, k=5, max_db_chunk=5)
+    assert res_empty_q.ids.shape == (0, 5)
+    assert res_empty_q.distances.shape == (0, 5)
+
+    # 3. Batched queries with k > N and k < N
+    q_batch = rng.standard_normal((4, d)).astype(np.float32)
+    res_batch_chunk = exact_search(q_batch, database, ids=ids, k=10, max_db_chunk=5)
+    res_batch_full = exact_search(q_batch, database, ids=ids, k=10, max_db_chunk=1000)
+    np.testing.assert_array_equal(res_batch_chunk.ids, res_batch_full.ids)
+    np.testing.assert_allclose(res_batch_chunk.distances, res_batch_full.distances)

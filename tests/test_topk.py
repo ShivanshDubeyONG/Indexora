@@ -227,3 +227,84 @@ def test_single_element_database():
     assert res5.ids.shape == (1,)
     assert res5.ids[0] == 777
     assert res5.distances[0] == np.float32(4.2)
+
+
+def test_partial_selection_equivalence_to_full_lexsort_randomized():
+    """Verify select_top_k matches full np.lexsort oracle across 200 randomized inputs."""
+    def full_lexsort_oracle(distances: np.ndarray, ids: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        order = np.lexsort((ids, distances))
+        take = min(k, len(distances))
+        chosen = order[:take]
+        return distances[chosen], ids[chosen]
+
+    rng = np.random.default_rng(42)
+    for _ in range(200):
+        n = int(rng.integers(1, 300))
+        k = int(rng.integers(1, n + 50))
+
+        # Include frequent duplicate distances and negative IDs
+        unique_dists = rng.uniform(0.0, 10.0, size=min(10, n)).astype(np.float32)
+        dists = rng.choice(unique_dists, size=n)
+        ids = rng.integers(-5000, 5000, size=n, dtype=np.int64)
+
+        result = select_top_k(dists, ids, k=k)
+        oracle_dists, oracle_ids = full_lexsort_oracle(dists, ids, k=k)
+
+        np.testing.assert_array_equal(result.distances, oracle_dists)
+        np.testing.assert_array_equal(result.ids, oracle_ids)
+
+
+def test_boundary_tie_breaking_adversarial():
+    """Verify boundary tie resolution when multiple candidates tie exactly at rank k."""
+    # Construct: 3 items strictly closer (< 2.0)
+    # 5 items tied at boundary (= 2.0) with scrambled IDs
+    # 3 items strictly farther (> 2.0)
+    # k = 5 -> should take 3 closer + 2 lowest IDs among the 5 tied
+    distances = np.array([1.0, 0.5, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 5.0, 4.0, 6.0], dtype=np.float32)
+    ids = np.array([10, 20, 30, 900, -50, 120, 0, 45, 999, 888, 777], dtype=np.int64)
+    # Tied IDs are: 900, -50, 120, 0, 45
+    # Two smallest are: -50, 0
+    k = 5
+
+    res = select_top_k(distances, ids, k=k)
+    expected_ids = np.array([20, 10, 30, -50, 0], dtype=np.int64)
+    expected_dists = np.array([0.5, 1.0, 1.5, 2.0, 2.0], dtype=np.float32)
+
+    np.testing.assert_array_equal(res.ids, expected_ids)
+    np.testing.assert_array_equal(res.distances, expected_dists)
+
+
+def test_boundary_all_tied_distances():
+    """Verify selection when every candidate has identical distance."""
+    n = 50
+    distances = np.full(n, 3.14, dtype=np.float32)
+    rng = np.random.default_rng(505)
+    ids = rng.permutation(np.arange(100, 100 + n, dtype=np.int64))
+
+    for k in [1, 5, 25, 50, 75]:
+        res = select_top_k(distances, ids, k=k)
+        expected_len = min(k, n)
+        assert len(res.ids) == expected_len
+        # Since all distances are tied, result should be the expected_len smallest IDs in ascending order
+        expected_ids = np.sort(ids)[:expected_len]
+        np.testing.assert_array_equal(res.ids, expected_ids)
+        np.testing.assert_allclose(res.distances, np.full(expected_len, 3.14, dtype=np.float32))
+
+
+def test_topk_more_than_k_tied_at_boundary_negative_ids():
+    """Verify tie-breaking when more than k candidates are tied exactly at the boundary with negative IDs."""
+    # 2 closer candidates (dists 0.1, 0.2)
+    # 10 tied candidates (all dist 1.5) with arbitrary positive and negative IDs
+    # 2 farther candidates (dists 3.0, 4.0)
+    # k = 5: requires 2 closer + 3 smallest IDs among the 10 tied
+    dists = np.array([0.1, 0.2] + [1.5] * 10 + [3.0, 4.0], dtype=np.float32)
+    ids = np.array([100, 200, -500, 800, -100, 42, -50, 999, -999, 12, -1, 7, 300, 400], dtype=np.int64)
+
+    # 10 tied IDs: [-500, 800, -100, 42, -50, 999, -999, 12, -1, 7]
+    # Smallest 3: -999, -500, -100
+    res = select_top_k(dists, ids, k=5)
+    expected_ids = np.array([100, 200, -999, -500, -100], dtype=np.int64)
+    expected_dists = np.array([0.1, 0.2, 1.5, 1.5, 1.5], dtype=np.float32)
+
+    np.testing.assert_array_equal(res.ids, expected_ids)
+    np.testing.assert_allclose(res.distances, expected_dists)

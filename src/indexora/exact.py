@@ -39,17 +39,60 @@ def _validate_ids(ids: np.ndarray, expected_n: int) -> np.ndarray:
     return ids
 
 
+def _exact_search_single_incremental(
+    query: np.ndarray,
+    database: np.ndarray,
+    ids: np.ndarray,
+    k: int,
+    max_db_chunk: int,
+) -> SearchResult:
+    """Perform exact search for a single query by consuming database blocks incrementally.
+
+    Maintains running top-k results per query to avoid allocating or retaining
+    large distance matrices in memory.
+    """
+    running_dists: np.ndarray | None = None
+    running_ids: np.ndarray | None = None
+    num_database = database.shape[0]
+
+    for start in range(0, num_database, max_db_chunk):
+        end = min(start + max_db_chunk, num_database)
+        db_chunk = database[start:end]
+        id_chunk = ids[start:end]
+        chunk_dists = pairwise_squared_l2_ref(query, db_chunk)
+        chunk_topk = select_top_k(chunk_dists, id_chunk, k=k)
+
+        if running_dists is None:
+            running_dists = chunk_topk.distances
+            running_ids = chunk_topk.ids
+        else:
+            merged_dists = np.concatenate([running_dists, chunk_topk.distances])
+            merged_ids = np.concatenate([running_ids, chunk_topk.ids])
+            merged_topk = select_top_k(merged_dists, merged_ids, k=k)
+            running_dists = merged_topk.distances
+            running_ids = merged_topk.ids
+
+    return SearchResult(
+        distances=running_dists if running_dists is not None else np.empty((0,), dtype=np.float32),
+        ids=running_ids if running_ids is not None else np.empty((0,), dtype=np.int64),
+    )
+
+
 def exact_search(
     queries: np.ndarray,
     database: np.ndarray,
     ids: np.ndarray | None = None,
     k: int = 10,
+    max_db_chunk: int = 32768,
 ) -> SearchResult:
     """Perform exhaustive exact nearest-neighbor search using reference semantics.
 
-    Computes pairwise squared-L2 distances against all database vectors using
+    Computes pairwise squared-L2 distances against database vectors using
     `pairwise_squared_l2_ref`, and deterministically selects the top-k nearest
     neighbors using `select_top_k` with ascending `(distance, ID)` tie-breaking.
+
+    For large databases (`N > max_db_chunk`), search consumes database blocks
+    incrementally to bound memory without retaining a full `(Q, N)` distance matrix.
 
     Parameters
     ----------
@@ -64,6 +107,8 @@ def exact_search(
         `np.arange(N, dtype=np.int64)`.
     k : int, default=10
         Number of nearest neighbors to retrieve. Must be a positive integer (k >= 1).
+    max_db_chunk : int, default=32768
+        Maximum number of database vectors evaluated per block during distance scoring.
 
     Returns
     -------
@@ -83,6 +128,9 @@ def exact_search(
     if k <= 0:
         raise ValueError("k must be positive")
 
+    if not isinstance(max_db_chunk, (int, np.integer)) or max_db_chunk <= 0:
+        raise ValueError(f"max_db_chunk must be a positive integer, got {max_db_chunk}")
+
     if not isinstance(queries, np.ndarray):
         raise TypeError(
             f"queries must be a numpy ndarray, got {type(queries).__name__}"
@@ -99,15 +147,21 @@ def exact_search(
     else:
         ids_arr = _validate_ids(ids, expected_n=num_database)
 
-    # 1. Compute pairwise distances using the reference kernel
-    distances = pairwise_squared_l2_ref(queries, database)
-
-    # 2. Select top-k deterministically
     is_single_query = queries.ndim == 1
     if is_single_query:
-        return select_top_k(distances, ids_arr, k=k)
+        if num_database <= max_db_chunk:
+            distances = pairwise_squared_l2_ref(queries, database)
+            return select_top_k(distances, ids_arr, k=k)
+        return _exact_search_single_incremental(
+            queries, database, ids_arr, k=k, max_db_chunk=max_db_chunk
+        )
 
     # Batched queries: shape (Q, d)
+    if queries.ndim != 2:
+        raise ValueError(
+            f"queries must be a 1D array of shape (d,) or 2D array of shape (Q, d), got ndim={queries.ndim}"
+        )
+
     num_queries = queries.shape[0]
     k_eff = min(k, num_database)
 
@@ -123,9 +177,19 @@ def exact_search(
             ids=np.empty((num_queries, 0), dtype=np.int64),
         )
 
-    per_query_results = [
-        select_top_k(distances[i], ids_arr, k=k) for i in range(num_queries)
-    ]
+    if num_database <= max_db_chunk:
+        distances = pairwise_squared_l2_ref(queries, database)
+        per_query_results = [
+            select_top_k(distances[i], ids_arr, k=k) for i in range(num_queries)
+        ]
+    else:
+        per_query_results = [
+            _exact_search_single_incremental(
+                queries[i], database, ids_arr, k=k, max_db_chunk=max_db_chunk
+            )
+            for i in range(num_queries)
+        ]
+
     batch_distances = np.stack([r.distances for r in per_query_results], axis=0)
     batch_ids = np.stack([r.ids for r in per_query_results], axis=0)
 
@@ -137,6 +201,7 @@ def generate_ground_truth(
     database: np.ndarray,
     ids: np.ndarray | None = None,
     k: int = 10,
+    max_db_chunk: int = 32768,
 ) -> SearchResult:
     """Generate deterministic ground-truth nearest neighbors using exact reference search.
 
@@ -156,13 +221,15 @@ def generate_ground_truth(
         If None, defaults to `np.arange(N, dtype=np.int64)`.
     k : int, default=10
         Number of nearest neighbors to retrieve. Must be a positive integer (k >= 1).
+    max_db_chunk : int, default=32768
+        Maximum number of database vectors evaluated per block during distance scoring.
 
     Returns
     -------
     SearchResult
         Ground-truth search results containing `.distances` (float32) and `.ids` (int64).
     """
-    return exact_search(queries=queries, database=database, ids=ids, k=k)
+    return exact_search(queries=queries, database=database, ids=ids, k=k, max_db_chunk=max_db_chunk)
 
 
 class ExactFlatIndex:
@@ -244,6 +311,7 @@ class ExactFlatIndex:
         self,
         queries: np.ndarray,
         k: int = 10,
+        max_db_chunk: int = 32768,
     ) -> SearchResult:
         """Search nearest neighbors for queries using reference semantics.
 
@@ -253,10 +321,12 @@ class ExactFlatIndex:
             Query vector(s) of shape `(d,)` or `(Q, d)` with strict `dtype=np.float32`.
         k : int, default=10
             Number of nearest neighbors to retrieve. Must be a positive integer (k >= 1).
+        max_db_chunk : int, default=32768
+            Maximum number of database vectors evaluated per block during distance scoring.
 
         Returns
         -------
         SearchResult
             SearchResult with `.distances` and `.ids`.
         """
-        return exact_search(queries=queries, database=self._database, ids=self._ids, k=k)
+        return exact_search(queries=queries, database=self._database, ids=self._ids, k=k, max_db_chunk=max_db_chunk)

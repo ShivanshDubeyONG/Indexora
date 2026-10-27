@@ -268,3 +268,101 @@ def test_single_vs_batched_random_vectors():
     assert dist_1d.shape == (20,)
     assert dist_2d.shape == (1, 20)
     np.testing.assert_array_equal(dist_1d, dist_2d[0])
+
+
+def test_chunked_kernel_parameter_validation():
+    """Verify max_buffer_bytes validation on non-positive and non-integer inputs."""
+    q = np.ones((4,), dtype=np.float32)
+    X = np.ones((5, 4), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="max_buffer_bytes must be positive"):
+        pairwise_squared_l2_ref(q, X, max_buffer_bytes=0)
+
+    with pytest.raises(ValueError, match="max_buffer_bytes must be positive"):
+        pairwise_squared_l2_ref(q, X, max_buffer_bytes=-1024)
+
+    with pytest.raises(TypeError, match="max_buffer_bytes must be an integer"):
+        pairwise_squared_l2_ref(q, X, max_buffer_bytes=1024.5)  # type: ignore
+
+    with pytest.raises(TypeError, match="max_buffer_bytes must be an integer"):
+        pairwise_squared_l2_ref(q, X, max_buffer_bytes="1024")  # type: ignore
+
+
+def test_chunked_kernel_equivalence_to_unchunked_oracle():
+    """Verify bit-for-bit equivalence between chunked kernel and unchunked broadcast tensor oracle."""
+    def unchunked_oracle(queries: np.ndarray, database: np.ndarray) -> np.ndarray:
+        is_single = queries.ndim == 1
+        q_2d = queries[np.newaxis, :] if is_single else queries
+        diff = q_2d[:, np.newaxis, :].astype(np.float64) - database[np.newaxis, :, :].astype(np.float64)
+        out = np.sum(diff * diff, axis=-1, dtype=np.float64).astype(np.float32)
+        return out[0] if is_single else out
+
+    rng = np.random.default_rng(101)
+
+    # Test across multiple Q, N, d shapes and buffer thresholds
+    test_cases = [
+        (1, 15, 3),      # single query
+        (5, 20, 8),      # small batch
+        (13, 37, 7),     # prime dimensions
+        (3, 100, 1),     # 1D feature
+        (8, 25, 128),    # higher dimension
+    ]
+
+    # Deliberately restrictive buffer sizes to force diverse chunking paths
+    buffer_sizes = [64, 256, 1024, 8192, 1024 * 1024]
+
+    for Q, N, d in test_cases:
+        queries = rng.standard_normal((Q, d)).astype(np.float32)
+        database = rng.standard_normal((N, d)).astype(np.float32)
+        oracle_batch = unchunked_oracle(queries, database)
+        oracle_single = unchunked_oracle(queries[0], database)
+
+        for buf in buffer_sizes:
+            res_batch = pairwise_squared_l2_ref(queries, database, max_buffer_bytes=buf)
+            res_single = pairwise_squared_l2_ref(queries[0], database, max_buffer_bytes=buf)
+
+            np.testing.assert_array_equal(res_batch, oracle_batch)
+            np.testing.assert_array_equal(res_single, oracle_single)
+
+
+def test_chunked_kernel_boundary_cases():
+    """Verify chunked kernel behavior on empty inputs, d=1, large d, and non-multiple chunks."""
+    rng = np.random.default_rng(202)
+
+    # Empty inputs with tight buffer
+    empty_q = np.empty((0, 10), dtype=np.float32)
+    db = rng.standard_normal((15, 10)).astype(np.float32)
+    assert pairwise_squared_l2_ref(empty_q, db, max_buffer_bytes=128).shape == (0, 15)
+
+    empty_db = np.empty((0, 10), dtype=np.float32)
+    q = rng.standard_normal((8, 10)).astype(np.float32)
+    assert pairwise_squared_l2_ref(q, empty_db, max_buffer_bytes=128).shape == (8, 0)
+    assert pairwise_squared_l2_ref(q[0], empty_db, max_buffer_bytes=128).shape == (0,)
+
+    # Large feature dimension (d = 256)
+    q_large_d = rng.standard_normal((4, 256)).astype(np.float32)
+    db_large_d = rng.standard_normal((10, 256)).astype(np.float32)
+    res_large = pairwise_squared_l2_ref(q_large_d, db_large_d, max_buffer_bytes=2048)
+    assert res_large.shape == (4, 10)
+    assert res_large.dtype == np.float32
+    # Verify non-negative squared distances
+    assert np.all(res_large >= 0.0)
+
+
+def test_chunked_kernel_memory_bound_structural():
+    """Verify chunked distance kernel on a workload where unchunked (Q, N, d) float64 tensor exceeds 16MB."""
+    rng = np.random.default_rng(303)
+    Q, N, d = 50, 400, 128
+    # Unchunked float64 (Q, N, d) tensor = 50 * 400 * 128 * 8 = 20,480,000 bytes (~20.5 MB)
+    queries = rng.standard_normal((Q, d)).astype(np.float32)
+    database = rng.standard_normal((N, d)).astype(np.float32)
+
+    # Restrict buffer to 512 KiB (524,288 bytes)
+    bounded_res = pairwise_squared_l2_ref(queries, database, max_buffer_bytes=512 * 1024)
+    assert bounded_res.shape == (Q, N)
+    assert bounded_res.dtype == np.float32
+
+    # Check a deterministic slice against direct float64 scalar computation
+    sample_diff = queries[0].astype(np.float64) - database[0].astype(np.float64)
+    expected_dist_0_0 = np.float32(np.sum(sample_diff * sample_diff))
+    np.testing.assert_allclose(bounded_res[0, 0], expected_dist_0_0)

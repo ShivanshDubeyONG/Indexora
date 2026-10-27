@@ -16,6 +16,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 3 (Data & Dataset Utilities):** Complete. `VectorDataset` split abstraction, stable IDs, reproducible synthetic & clustered generators, L2 normalization with zero-vector policy, and checksummed offline cache.
 - **Phase 4 (Clustering):** Complete. $K$-means++ centroid initialization, vectorized Lloyd iteration loop, configurable empty-cluster policies (`reseed_furthest`, `keep`, `error`), and frozen `KMeansResult` container.
 - **Phase 5 (IVF-Flat):** Complete. Inverted File Flat index with coarse k-means quantization, durable int64 IDs, immutable posting lists, multi-probe candidate gathering, and bit-for-bit all-probe equivalence with exact search.
+- **Phase 6 (Benchmark Harness v0.1):** Complete. Ground-truth baseline evaluation, multi-probe IVF sweeps across nlist/nprobe, Recall@k with sentinel exclusion, distance computation accounting, machine-readable JSON/CSV reporting, automated plot generation, and CLI runner.
 
 ## Project Conventions
 
@@ -58,6 +59,20 @@ Execute the test suite using pytest:
 
 ```bash
 pytest
+```
+
+### Running Benchmarks
+
+Run the quick development smoke test:
+
+```bash
+python -m indexora.benchmark --smoke
+```
+
+Run a standard parameter sweep:
+
+```bash
+python -m indexora.benchmark --n-base 10000 --n-queries 100 --k 10 --nlist 10,50,100 --nprobe 1,2,5,10,20
 ```
 
 ## Documentation

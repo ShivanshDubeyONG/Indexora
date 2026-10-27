@@ -10,6 +10,7 @@ from indexora.data import (
     normalize_l2,
     save_dataset,
 )
+from indexora.eval import compute_recall_at_k, count_distance_computations
 from indexora.exact import ExactFlatIndex, exact_search, generate_ground_truth
 from indexora.ivf import (
     InvertedList,
@@ -44,4 +45,19 @@ __all__ = [
     "IVFFlatIndex",
     "ivf_flat_build",
     "ivf_flat_search",
+    "compute_recall_at_k",
+    "count_distance_computations",
+    "BenchmarkConfig",
+    "RunMetrics",
+    "BenchmarkResult",
+    "run_benchmark",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import benchmark symbols to avoid runpy RuntimeWarning when executing -m indexora.benchmark."""
+    if name in {"BenchmarkConfig", "BenchmarkResult", "RunMetrics", "run_benchmark"}:
+        import indexora.benchmark as _bench
+
+        return getattr(_bench, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

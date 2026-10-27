@@ -205,11 +205,14 @@ class IVFFlatIndex:
             self._centroids = np.ascontiguousarray(validated_c.copy(), dtype=np.float32)
 
         # 2. Coarse Quantization: assign each database vector to nearest coarse centroid
-        # Pairwise distance shape: (N, nlist) using reference kernel
-        dists = pairwise_squared_l2_ref(database, self._centroids)
-
-        # Deterministic tie-breaking: np.argmin selects lowest centroid index on equal distance
-        assignments = np.argmin(dists, axis=1)
+        # Uses bounded database blocks to avoid allocating an unconstrained (N, nlist) matrix
+        assignments = np.empty(N, dtype=np.int64)
+        assign_block_size = 10000
+        for b_start in range(0, N, assign_block_size):
+            b_end = min(b_start + assign_block_size, N)
+            block_dists = pairwise_squared_l2_ref(database[b_start:b_end], self._centroids)
+            # Deterministic tie-breaking: np.argmin selects lowest centroid index on equal distance
+            assignments[b_start:b_end] = np.argmin(block_dists, axis=1)
 
         # 3. Build inverted lists (one per coarse centroid)
         invlists = []
@@ -337,7 +340,12 @@ class IVFFlatIndex:
         Returns
         -------
         SearchResult
-            Named container with `.distances` (float32) and `.ids` (int64).
+            Named container with `.distances` (float32) and `.ids` (int64):
+            - Single query `(d,)`: 1D arrays of exact length `min(k, N_cand)` without padding.
+            - Batched queries `(Q, d)`: 2D arrays of shape `(Q, target_k)` where
+              `target_k = max(retrieved_lengths)`. If queries retrieve variable numbers of
+              candidates (< k), shorter result rows are padded with sentinel ID `-1` and
+              sentinel distance `inf` to maintain rectangular 2D arrays per ADR-0006.
         """
         # Validate k
         if not isinstance(k, (int, np.integer)):

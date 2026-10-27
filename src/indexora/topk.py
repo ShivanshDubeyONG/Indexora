@@ -130,15 +130,41 @@ def select_top_k(
             ids=np.empty((0,), dtype=np.int64),
         )
 
-    # 6. Deterministic ordering: ascending by distance, tie-breaking by ascending ID
-    # np.lexsort sorts by the last key first (distances), broken by the first key (ids)
-    sorted_indices = np.lexsort((ids, distances))
+    # 6. Top-k candidate selection with O(N + k log k) partial selection
+    # If k >= n_items, all candidates are included; we sort all n_items by (distance, ID)
+    if k >= n_items:
+        sorted_indices = np.lexsort((ids, distances))
+        return SearchResult(
+            distances=distances[sorted_indices],
+            ids=ids[sorted_indices],
+        )
 
-    # 7. Select top min(k, N) candidates
-    num_to_take = min(k, n_items)
-    selected_indices = sorted_indices[:num_to_take]
+    # 7. Partial selection for k < n_items:
+    # Step 7a: Find boundary distance at rank k-1 in O(N) using np.partition
+    boundary_dist = np.partition(distances, k - 1)[k - 1]
+
+    # Step 7b: Partition candidates into strictly closer and boundary-tied sets
+    strictly_closer = np.flatnonzero(distances < boundary_dist)
+    n_closer = len(strictly_closer)
+    n_needed = k - n_closer
+
+    tied = np.flatnonzero(distances == boundary_dist)
+
+    # Step 7c: Resolve candidates tied at the boundary by selecting smallest IDs
+    if len(tied) == n_needed:
+        selected_indices = np.concatenate([strictly_closer, tied])
+    else:
+        tied_ids = ids[tied]
+        # Partial selection on tied IDs in O(|tied|) to choose the n_needed smallest IDs
+        chosen_tied_local = np.argpartition(tied_ids, n_needed - 1)[:n_needed]
+        selected_indices = np.concatenate([strictly_closer, tied[chosen_tied_local]])
+
+    # Step 7d: Sort the final k chosen results by ascending (distance, ID)
+    sel_dists = distances[selected_indices]
+    sel_ids = ids[selected_indices]
+    final_order = np.lexsort((sel_ids, sel_dists))
 
     return SearchResult(
-        distances=distances[selected_indices],
-        ids=ids[selected_indices],
+        distances=sel_dists[final_order],
+        ids=sel_ids[final_order],
     )
