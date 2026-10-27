@@ -273,3 +273,66 @@ Phase 4 introduces unsupervised vector partitioning via $k$-means clustering, wh
 ### 3. Consequences & Invariants
 - Phase 5 (IVF-Flat) can train its coarse centroids directly using `kmeans(dataset.train or dataset.base, k=nlist, seed=seed)`.
 - Synthetic multi-cluster datasets (`generate_clustered_dataset`) can be used to mathematically verify that $k$-means converges cleanly on well-separated data.
+
+---
+
+## ADR-0006: Phase 5 IVF-Flat Architecture, Inverted Lists, and Multi-Probe Search
+
+- **Status:** Proposed (Design & Contract Specification for Human Core)
+- **Date:** 2026-10-27
+- **Decision Owner:** Human Core (Phase 5 Algorithm Ownership)
+
+### 1. Context
+Phase 5 introduces Indexora's first approximate nearest neighbor (ANN) index: **IVF-Flat (Inverted File with Flat Vectors)**. Inverted file indexing trades search recall for latency by partitioning the vector space into $W = \text{nlist}$ Voronoi cells using coarse centroids trained via $k$-means. At query time, rather than performing exhaustive brute-force distance comparisons against all $N$ database vectors, the engine finds the $P = \text{nprobe}$ nearest coarse centroids and restricts exact distance calculations to candidate vectors stored in those $P$ inverted lists.
+
+Per `plan/implementation.md`, Phase 5 is designated **HUMAN CORE**. The core indexing assignment loop and multi-probe query loop belong to the human author. This record formalizes the data structures, indexing invariants, candidate gathering semantics, and decisive acceptance criteria.
+
+### 2. Decisions
+
+1. **Inverted List Container (`InvertedList`):**
+   - Each inverted list partition is represented by an immutable dataclass `InvertedList`:
+     - `ids: np.ndarray`: 1D array of durable vector identifiers with strict `dtype=np.int64`.
+     - `vectors: np.ndarray`: 2D array of shape `(L, d)` with strict `dtype=np.float32`, guaranteed C-contiguous in memory.
+   - **Empty List Representation:** If a coarse cluster is empty ($L = 0$), the list contains `ids = np.empty((0,), dtype=np.int64)` and `vectors = np.empty((0, d), dtype=np.float32)`. Empty lists are fully valid and must not cause division-by-zero, indexing errors, or NaNs.
+
+2. **Index Class Structure (`IVFFlatIndex`):**
+   - The index exposes:
+     - `.d`: Feature dimension ($d \ge 1$).
+     - `.ntotal`: Total number of indexed vectors ($N \ge 1$).
+     - `.nlist`: Number of coarse inverted lists ($1 \le \text{nlist} \le N$).
+     - `.nprobe`: Number of inverted lists probed per query ($1 \le \text{nprobe} \le \text{nlist}$). Configurable dynamically via setter property or query-time parameter.
+     - `.centroids`: Array of shape `(nlist, d)` with `dtype=np.float32`.
+     - `.invlists`: Tuple of length `nlist` containing the individual `InvertedList` instances.
+     - `list_sizes()`: 1D `int64` array of shape `(nlist,)` returning vector occupancy counts across all lists.
+     - `get_list(list_id: int)`: Direct lookup for list partition $j \in [0, \text{nlist}-1]$.
+
+3. **Core Partition Invariants:**
+   - **Exhaustive Single-List Assignment:** Every database vector $x_i$ must belong to exactly one inverted list:
+     $$\sum_{j=0}^{\text{nlist}-1} |S_j| = N$$
+   - **Identifier Preservation:** The union of all IDs stored across all inverted lists must form an exact permutation of the original database IDs:
+     $$\bigcup_{j=0}^{\text{nlist}-1} \text{invlists}[j].ids \equiv \text{database\_ids}$$
+     No database vector is dropped, duplicated, or reassigned to a synthetic ID.
+
+4. **Multi-Probe Candidate Gathering & Search Semantics:**
+   - For each query vector $q \in \mathbb{R}^d$:
+     1. **Coarse Quantization:** Compute squared Euclidean distances between $q$ and all $\text{nlist}$ coarse centroids using `pairwise_squared_l2_ref(q[None, :], centroids)`.
+     2. **Centroid Ranking:** Select the nearest $P = \text{nprobe}$ centroid indices. Centroid ties are broken deterministically by lower centroid index.
+     3. **Candidate Gathering:** Pool all vectors and IDs from the selected $P$ inverted lists:
+        $$X_{\text{cand}} = \text{concatenate}([S_{j_1}.\text{vectors}, \dots, S_{j_P}.\text{vectors}])$$
+        $$\text{IDs}_{\text{cand}} = \text{concatenate}([S_{j_1}.\text{ids}, \dots, S_{j_P}.\text{ids}])$$
+        If all probed lists are empty ($N_{\text{cand}} = 0$), return empty results or fall back according to standard top-$k$ contracts.
+     4. **Exact Candidate Scoring & Top-$k$ Selection:**
+        - Compute exact squared Euclidean distances between $q$ and $X_{\text{cand}}$ using `pairwise_squared_l2_ref`.
+        - Rank candidate vectors and select top-$k$ using `select_top_k(distances, IDs_{\text{cand}}, k)`.
+        - Result sorting and tie-breaking strictly adhere to ADR-0001: ascending by distance, breaking equal-distance ties by ascending `int64` ID.
+
+5. **Decisive Acceptance Gate (All-Probe Equivalence):**
+   - When $\text{nprobe} == \text{nlist}$, every inverted list is inspected.
+   - The candidate set $X_{\text{cand}}$ contains all $N$ database vectors, and $\text{IDs}_{\text{cand}}$ contains all $N$ database IDs.
+   - **Invariant:** With $\text{nprobe} == \text{nlist}$, IVF-Flat search must produce top-$k$ results bit-for-bit identical to `exact_search` in both `.ids` and `.distances`.
+   - Partial probing ($\text{nprobe} < \text{nlist}$) must be evaluated empirically against exact ground truth; recall values are never hard-coded or assumed.
+
+### 3. Consequences & Invariants
+- Zero vector loss during partitioning; index validation guarantees memory safety and strict dtype enforcement (`float32` vectors, `int64` IDs).
+- Complete determinism across all queries and runs.
+- Clean foundation for Phase 6 benchmarking sweeps (`nprobe` vs. recall@k and latency).

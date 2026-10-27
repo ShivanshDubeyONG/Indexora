@@ -11,6 +11,12 @@ from indexora.data import (
     save_dataset,
 )
 from indexora.exact import ExactFlatIndex, exact_search, generate_ground_truth
+from indexora.ivf import (
+    InvertedList,
+    IVFFlatIndex,
+    ivf_flat_build,
+    ivf_flat_search,
+)
 from indexora.kernels import pairwise_squared_l2_ref
 from indexora.topk import SearchResult, select_top_k
 
@@ -34,4 +40,8 @@ __all__ = [
     "KMeansResult",
     "kmeans_plus_plus",
     "kmeans",
+    "InvertedList",
+    "IVFFlatIndex",
+    "ivf_flat_build",
+    "ivf_flat_search",
 ]
