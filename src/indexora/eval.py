@@ -103,6 +103,10 @@ def compute_recall_at_k(
     eff_k = gt_2d.shape[1] if k is None else int(k)
     if eff_k <= 0:
         raise ValueError(f"k must be a positive integer, got {eff_k}")
+    if k is not None and k > gt_2d.shape[1]:
+        raise ValueError(
+            f"Requested k={k} exceeds ground-truth column count ({gt_2d.shape[1]})."
+        )
 
     total_recall = 0.0
     for i in range(num_queries):

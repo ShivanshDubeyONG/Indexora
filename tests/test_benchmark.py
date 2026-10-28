@@ -260,3 +260,104 @@ def test_benchmark_cli_smoke(tmp_path: Path):
 
     assert (Path(out_dir) / "benchmark_results.json").exists()
     assert (Path(out_dir) / "benchmark_summary.csv").exists()
+
+
+# ============================================================================
+# 6. Advanced Edge Cases & Reproducibility
+# ============================================================================
+
+
+def test_recall_at_k_custom_and_negative_stable_ids():
+    """Verify Recall@k correctly handles large and negative custom IDs."""
+    # Custom IDs including negative (non-sentinel) and large values
+    gt = np.array([[-999999, 0, 1000000000000]], dtype=np.int64)
+    # Retrieved 2 of 3 valid IDs, plus sentinel -1 padding
+    ret = np.array([[-999999, -1, 1000000000000]], dtype=np.int64)
+
+    recall = compute_recall_at_k(ret, gt, k=3, sentinel_id=-1)
+    np.testing.assert_allclose(recall, 2.0 / 3.0)
+
+
+def test_recall_at_k_k_greater_than_gt_columns_raises():
+    """Verify ValueError is raised when requested k exceeds ground-truth column count."""
+    gt = np.array([[10, 20]], dtype=np.int64)
+    ret = np.array([[10, 20]], dtype=np.int64)
+
+    with pytest.raises(ValueError, match="Requested k=5 exceeds ground-truth column count"):
+        compute_recall_at_k(ret, gt, k=5)
+
+
+def test_recall_at_k_fewer_than_k_database_vectors():
+    """Verify Recall@k behavior when database has fewer than k elements (N < k)."""
+    # When N=2 and k=5, exact search returns shape (1, 2)
+    gt = np.array([[100, 200]], dtype=np.int64)
+    # IVF search might return padded shape (1, 5) with sentinels
+    ret = np.array([[100, 200, -1, -1, -1]], dtype=np.int64)
+
+    # Calling compute_recall_at_k with k=None (eff_k = gt.shape[1] = 2)
+    recall = compute_recall_at_k(ret, gt, sentinel_id=-1)
+    assert recall == 1.0
+
+
+def test_benchmark_reproducibility():
+    """Verify run_benchmark produces bit-identical recall and metrics given identical seeds."""
+    data = generate_clustered_dataset(
+        n_base=50,
+        n_queries=5,
+        d=4,
+        n_clusters=3,
+        seed=123,
+    )
+
+    config = BenchmarkConfig(
+        name="reproducibility_test",
+        k=3,
+        warmup_runs=1,
+        repeat_runs=2,
+        seed=123,
+        nlist_values=(3,),
+        nprobe_values=(1, 2, 3),
+        smoke=True,
+    )
+
+    res1 = run_benchmark(dataset=data.dataset, config=config, verbose=False)
+    res2 = run_benchmark(dataset=data.dataset, config=config, verbose=False)
+
+    assert len(res1.runs) == len(res2.runs)
+    for r1, r2 in zip(res1.runs, res2.runs):
+        assert r1.index_name == r2.index_name
+        assert r1.parameters == r2.parameters
+        assert r1.recall_at_k == r2.recall_at_k
+        assert r1.distance_computations_per_query == r2.distance_computations_per_query
+
+
+def test_benchmark_separation_of_build_and_query_timing():
+    """Verify that build time and query latency are tracked as distinct, positive measurements."""
+    data = generate_clustered_dataset(
+        n_base=40,
+        n_queries=4,
+        d=4,
+        n_clusters=2,
+        seed=99,
+    )
+
+    config = BenchmarkConfig(
+        name="timing_separation_test",
+        k=2,
+        warmup_runs=1,
+        repeat_runs=3,
+        seed=99,
+        nlist_values=(2,),
+        nprobe_values=(1,),
+        smoke=True,
+    )
+
+    result = run_benchmark(dataset=data.dataset, config=config, verbose=False)
+    for r in result.runs:
+        # Build time is recorded
+        assert r.build_time_seconds >= 0.0
+        # Query latency is recorded with repeat_runs samples
+        assert len(r.query_latencies_ms) == 3
+        assert r.p50_latency_ms > 0.0
+        assert r.min_latency_ms <= r.p50_latency_ms <= r.max_latency_ms
+        assert r.qps > 0.0
