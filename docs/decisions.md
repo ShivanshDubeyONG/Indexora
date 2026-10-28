@@ -104,8 +104,10 @@ These decisions define design-time API contracts and test specifications. They d
    - Top-$k$ selection (`select_top_k`) and subsequent search functions return a `SearchResult` container exposing named attributes:
      - `.distances`: 1D (or 2D if batched) `np.ndarray` of `float32`.
      - `.ids`: 1D (or 2D if batched) `np.ndarray` of `int64`.
-   - *API Separation:* Raw distance kernels (such as `pairwise_squared_l2_ref`) compute pairwise distances and return a NumPy array of `float32` distances. They do not return `SearchResult` and do not process IDs. `SearchResult` is exclusively produced by top-$k$ selection and search layers.
-   - *Rationale:* Plain tuples like `(distances, ids)` are error-prone during caller unpacking (risk of swapping indices vs distances). Named attributes provide type safety, self-documenting code, and clean indexing across all engine layers.
+     - `.mask`: 1D (or 2D if batched) `np.ndarray` of `bool`, where `True` indicates a valid nearest neighbor and `False` indicates a padded missing slot.
+     - `.distance_computations`: optional `int` representing total distance calculations performed during the search.
+   - *API Separation & Validity Invariant:* Raw distance kernels compute pairwise distances and return a NumPy array of `float32` distances. `SearchResult` is produced by top-$k$ selection and search layers. Validity is determined by `.mask`, allowing any `int64` identifier (including `-1`) to be stored and retrieved as a legitimate entity ID.
+   - *Rationale:* Plain tuples like `(distances, ids)` are error-prone during caller unpacking. Named attributes provide type safety, and the explicit validity mask decouples padding from entity identity.
 
 ### 3. Consequences & Invariants
 - These contracts define the acceptance interface for the upcoming Phase 1 implementation (to be implemented by the human owner).
@@ -326,13 +328,12 @@ Per `plan/implementation.md`, Phase 5 is designated **HUMAN CORE**. The core ind
         - Compute exact squared Euclidean distances between $q$ and $X_{\text{cand}}$ using `pairwise_squared_l2_ref`.
         - Rank candidate vectors and select top-$k$ using `select_top_k(distances, IDs_{\text{cand}}, k)`.
         - Result sorting and tie-breaking strictly adhere to ADR-0001: ascending by distance, breaking equal-distance ties by ascending `int64` ID.
-     5. **Batched Result Array Representation & Sentinel Padding:**
-        - Single queries (`queries.ndim == 1`) return a 1D `SearchResult` of length $\min(k, N_{\text{cand}})$ without padding.
+     5. **Batched Result Array Representation & Validity Mask:**
+        - Single queries (`queries.ndim == 1`) return a 1D `SearchResult` of length $\min(k, N_{\text{cand}})$ without padding, with all elements in `.mask` set to `True`.
         - Batched queries (`queries.ndim == 2`) return 2D arrays of shape `(Q, \text{target\_k})` where $\text{target\_k} = \max_i (\text{len}(r_i))$.
-        - If individual queries retrieve differing numbers of candidates (e.g. when $N_{\text{cand}} < k$ for some queries), shorter rows are padded up to $\text{target\_k}$ with:
-          - Sentinel ID: `np.int64(-1)`
-          - Sentinel distance: `np.float32(np.inf)`
-        - *Evaluation Invariant:* Sentinel padding slots represent non-neighbors. All downstream evaluation routines (such as Recall@k or Precision@k) must strictly ignore ID `-1` and infinite distance, ensuring dummy IDs are never counted as ground-truth hits.
+        - If individual queries retrieve differing numbers of candidates ($N_{\text{cand}} < k$), shorter rows are padded up to $\text{target\_k}$ with filler values (`id = -1`, `distance = inf`) and have `mask = False`.
+        - Real results retain `mask = True`, even if their entity ID happens to be `-1`.
+        - *Evaluation Invariant:* Validity is determined exclusively through `.mask`. Downstream evaluation routines (such as Recall@k) filter on `mask == True`, ensuring legitimate entity ID `-1` is preserved as a valid hit while padding slots are excluded without value collisions.
 
 5. **Decisive Acceptance Gate (All-Probe Equivalence):**
    - When $\text{nprobe} == \text{nlist}$, every inverted list is inspected.
@@ -393,3 +394,58 @@ Phase 6 establishes Indexora's reproducible evaluation harness. In vector search
 - Benchmarks are completely reproducible across environments using explicit random seeds.
 - The harness operates fully offline without downloading external assets or requiring mandatory heavy dependencies.
 - Serves as the acceptance gate for Phase 6 and provides the evaluation baseline for Phase 7 (reference adapters) and Phase 8 (hardware acceleration).
+
+---
+
+## ADR-0008: Phase 6.5 Benchmark Hardening, SIFT-100k Evaluation, and v0.1 Readiness
+
+- **Status:** Accepted
+- **Date:** 2026-10-29
+- **Decision Owner:** Implementation Engineer (Phase 6.5 Hardening)
+
+### 1. Context
+To establish release readiness for Indexora v0.1, the evaluation harness required hardening across five critical dimensions:
+1. **Result-Validity vs ID -1 Collision:** Disentangling valid entity ID `-1` from array padding.
+2. **Timing Methodology:** Strictly separating individual per-query latency distributions from full-batch throughput (QPS).
+3. **Storage Memory Accounting:** Explicitly reporting persistent index storage distinct from temporary allocation peaks (`tracemalloc`).
+4. **Distance Computation Accounting:** Instrumenting actual distance evaluations executed inside the search path.
+5. **Real-Data Workloads:** Supporting canonical SIFT .fvecs datasets (e.g. SIFT-100k subset) for non-synthetic validation.
+
+### 2. Decisions
+
+1. **Explicit Result Validity Mask (`SearchResult.mask`):**
+   - `SearchResult` carries a boolean array `.mask` of shape matching `.ids` and `.distances`.
+   - `mask[i, j] == True` indicates a valid nearest neighbor. `mask[i, j] == False` indicates an empty padded slot.
+   - Exact search and single-query IVF returns have all entries set to `True`.
+   - Batched IVF search marks uneven candidate slots as `False`.
+   - Entity IDs with value `-1` are preserved as valid neighbors whenever `mask` is `True`.
+   - `compute_recall_at_k` uses `.mask` to filter candidates, ensuring real `-1` IDs count as hits while padding slots are excluded.
+
+2. **Per-Query Latency vs. Batch Throughput (QPS):**
+   - Individual queries are timed independently using high-resolution monotonic clocks (`time.perf_counter()`) to produce p50, p95, p99, mean, min, and max latency percentiles.
+   - Batch throughput is measured separately over repeated whole-batch runs: $\text{QPS} = \text{total\_queries} / \text{total\_elapsed\_seconds}$.
+   - Batch latency is never presented as per-query latency percentiles.
+
+3. **Index Storage Memory Reporting:**
+   - Indices expose exact persistent storage:
+     - ExactFlatIndex: $N \times (4d + 8)$ bytes.
+     - IVFFlatIndex: $n_{\text{list}} \times 4d + N \times (4d + 8)$ bytes.
+   - Metrics recorded: `index_memory_bytes`, `index_memory_mib` (binary units $1024^2$), and `bytes_per_vector`.
+   - Build-time allocations (`build_peak_tracemalloc_bytes`) are reported separately and never equated with index size or process resident set.
+
+4. **In-Path Distance Computation Tracking:**
+   - Search paths record actual distance evaluations performed during query execution:
+     - Exact scan: $Q \times N$ distance computations.
+     - IVF search: coarse centroid comparisons ($Q \times n_{\text{list}}$) plus exact candidate vector evaluations $\sum N_{\text{cand}, i}$.
+   - Distance counts are returned via `SearchResult.distance_computations` without redundant re-ranking.
+
+5. **SIFT .fvecs Dataset Loader:**
+   - Added `read_fvecs`, `write_fvecs`, and `load_sift_dataset` supporting standard binary vector files.
+   - Validates little-endian int32 dimension headers, record size alignment, finiteness, and C-contiguity.
+   - Supports prefix reads (`n_base`, `n_queries`) without loading extraneous records into RAM.
+   - Documents Texmex SIFT1M provenance and SHA-256 integrity verification.
+
+### 3. Consequences & Invariants
+- Complete ID integrity: all valid `int64` entity IDs are supported across exact search, IVF search, and recall evaluation.
+- Realistic benchmarks: headline plots reflect per-query latency trade-offs on real or synthetic data.
+- Reproducible, honest accounting with transparent release criteria.

@@ -19,10 +19,29 @@ def test_search_result_container_structure():
     assert isinstance(result, SearchResult)
     assert hasattr(result, "distances")
     assert hasattr(result, "ids")
+    assert hasattr(result, "mask")
+    assert hasattr(result, "distance_computations")
     np.testing.assert_array_equal(result.distances, distances)
     np.testing.assert_array_equal(result.ids, ids)
+    np.testing.assert_array_equal(result.mask, np.ones_like(ids, dtype=bool))
     assert result.distances.dtype == np.float32
     assert result.ids.dtype == np.int64
+    assert result.mask.dtype == bool
+    assert result.distance_computations is None
+
+    # Custom mask and distance_computations
+    res_custom = SearchResult(
+        distances=distances,
+        ids=ids,
+        mask=np.array([True, False], dtype=bool),
+        distance_computations=42,
+        centroid_distance_computations=10,
+        candidate_distance_computations=32,
+    )
+    np.testing.assert_array_equal(res_custom.mask, np.array([True, False], dtype=bool))
+    assert res_custom.distance_computations == 42
+    assert res_custom.centroid_distance_computations == 10
+    assert res_custom.candidate_distance_computations == 32
 
     # Reject non-float32 distances
     with pytest.raises(TypeError):
@@ -35,6 +54,38 @@ def test_search_result_container_structure():
     # Reject shape mismatch
     with pytest.raises(ValueError):
         SearchResult(distances=distances, ids=np.array([101], dtype=np.int64))
+
+    # Reject non-bool mask
+    with pytest.raises(TypeError):
+        SearchResult(distances=distances, ids=ids, mask=np.array([1, 0]))
+
+    # Reject mask shape mismatch
+    with pytest.raises(ValueError):
+        SearchResult(distances=distances, ids=ids, mask=np.array([True], dtype=bool))
+
+    # Reject negative distance_computations
+    with pytest.raises(ValueError):
+        SearchResult(distances=distances, ids=ids, distance_computations=-1)
+
+    # Reject non-integer distance_computations
+    with pytest.raises(TypeError):
+        SearchResult(distances=distances, ids=ids, distance_computations=3.14)  # type: ignore[arg-type]
+
+    # Reject negative centroid_distance_computations
+    with pytest.raises(ValueError):
+        SearchResult(distances=distances, ids=ids, centroid_distance_computations=-1)
+
+    # Reject non-integer centroid_distance_computations
+    with pytest.raises(TypeError):
+        SearchResult(distances=distances, ids=ids, centroid_distance_computations="bad")  # type: ignore[arg-type]
+
+    # Reject negative candidate_distance_computations
+    with pytest.raises(ValueError):
+        SearchResult(distances=distances, ids=ids, candidate_distance_computations=-1)
+
+    # Reject non-integer candidate_distance_computations
+    with pytest.raises(TypeError):
+        SearchResult(distances=distances, ids=ids, candidate_distance_computations="bad")  # type: ignore[arg-type]
 
 
 def test_t1_10_minimal_selection_k1():
@@ -198,6 +249,18 @@ def test_search_result_immutability():
 
     with pytest.raises((FrozenInstanceError, AttributeError)):
         res.ids = np.array([99], dtype=np.int64)
+
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        res.mask = np.array([False], dtype=bool)
+
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        res.distance_computations = 100
+
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        res.centroid_distance_computations = 50
+
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        res.candidate_distance_computations = 50
 
 
 def test_deterministic_tie_breaking_negative_and_large_int64_ids():

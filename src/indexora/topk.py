@@ -6,7 +6,7 @@ top-k nearest neighbors from distance arrays with strict deterministic tie-break
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 
@@ -14,7 +14,8 @@ import numpy as np
 class SearchResult:
     """Structured container for nearest-neighbor query results.
 
-    Exposes named attributes `.distances` and `.ids` conforming to ADR-0002.
+    Exposes named attributes `.distances` (float32), `.ids` (int64),
+    `.mask` (bool), and optional `.distance_computations` (int).
 
     Parameters
     ----------
@@ -22,10 +23,19 @@ class SearchResult:
         Array of squared distances with strict `dtype=np.float32`.
     ids : np.ndarray
         Array of durable entity identifiers with strict `dtype=np.int64`.
+    mask : np.ndarray | None, default=None
+        Boolean array of the same shape indicating valid neighbor slots (`True`)
+        versus padding slots (`False`). If None, defaults to all `True`.
+    distance_computations : int | None, default=None
+        Total count of vector distance computations performed for this search.
     """
 
     distances: np.ndarray
     ids: np.ndarray
+    mask: np.ndarray = field(default=None)  # type: ignore[assignment]
+    distance_computations: int | None = field(default=None)
+    centroid_distance_computations: int | None = field(default=None)
+    candidate_distance_computations: int | None = field(default=None)
 
     def __post_init__(self) -> None:
         if not isinstance(self.distances, np.ndarray):
@@ -48,6 +58,46 @@ class SearchResult:
             raise ValueError(
                 f"Shape mismatch between distances {self.distances.shape} and ids {self.ids.shape}"
             )
+
+        if self.mask is None:
+            object.__setattr__(self, "mask", np.ones(self.ids.shape, dtype=bool))
+        else:
+            if not isinstance(self.mask, np.ndarray):
+                raise TypeError(
+                    f"mask must be a numpy ndarray, got {type(self.mask).__name__}"
+                )
+            if self.mask.dtype != np.bool_ and self.mask.dtype != bool:
+                raise TypeError(
+                    f"mask must have dtype bool, got {self.mask.dtype}"
+                )
+            if self.mask.shape != self.ids.shape:
+                raise ValueError(
+                    f"Shape mismatch between mask {self.mask.shape} and ids {self.ids.shape}"
+                )
+
+        if self.distance_computations is not None:
+            if not isinstance(self.distance_computations, (int, np.integer)):
+                raise TypeError(
+                    f"distance_computations must be an integer, got {type(self.distance_computations).__name__}"
+                )
+            if self.distance_computations < 0:
+                raise ValueError("distance_computations must be non-negative")
+
+        if self.centroid_distance_computations is not None:
+            if not isinstance(self.centroid_distance_computations, (int, np.integer)):
+                raise TypeError(
+                    f"centroid_distance_computations must be an integer, got {type(self.centroid_distance_computations).__name__}"
+                )
+            if self.centroid_distance_computations < 0:
+                raise ValueError("centroid_distance_computations must be non-negative")
+
+        if self.candidate_distance_computations is not None:
+            if not isinstance(self.candidate_distance_computations, (int, np.integer)):
+                raise TypeError(
+                    f"candidate_distance_computations must be an integer, got {type(self.candidate_distance_computations).__name__}"
+                )
+            if self.candidate_distance_computations < 0:
+                raise ValueError("candidate_distance_computations must be non-negative")
 
 
 def select_top_k(

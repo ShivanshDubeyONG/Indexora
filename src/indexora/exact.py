@@ -151,9 +151,25 @@ def exact_search(
     if is_single_query:
         if num_database <= max_db_chunk:
             distances = pairwise_squared_l2_ref(queries, database)
-            return select_top_k(distances, ids_arr, k=k)
-        return _exact_search_single_incremental(
+            res = select_top_k(distances, ids_arr, k=k)
+            return SearchResult(
+                distances=res.distances,
+                ids=res.ids,
+                mask=res.mask,
+                distance_computations=num_database,
+                centroid_distance_computations=0,
+                candidate_distance_computations=num_database,
+            )
+        res = _exact_search_single_incremental(
             queries, database, ids_arr, k=k, max_db_chunk=max_db_chunk
+        )
+        return SearchResult(
+            distances=res.distances,
+            ids=res.ids,
+            mask=res.mask,
+            distance_computations=num_database,
+            centroid_distance_computations=0,
+            candidate_distance_computations=num_database,
         )
 
     # Batched queries: shape (Q, d)
@@ -169,12 +185,18 @@ def exact_search(
         return SearchResult(
             distances=np.empty((0, k_eff), dtype=np.float32),
             ids=np.empty((0, k_eff), dtype=np.int64),
+            distance_computations=0,
+            centroid_distance_computations=0,
+            candidate_distance_computations=0,
         )
 
     if num_database == 0:
         return SearchResult(
             distances=np.empty((num_queries, 0), dtype=np.float32),
             ids=np.empty((num_queries, 0), dtype=np.int64),
+            distance_computations=0,
+            centroid_distance_computations=0,
+            candidate_distance_computations=0,
         )
 
     if num_database <= max_db_chunk:
@@ -192,8 +214,17 @@ def exact_search(
 
     batch_distances = np.stack([r.distances for r in per_query_results], axis=0)
     batch_ids = np.stack([r.ids for r in per_query_results], axis=0)
+    batch_mask = np.ones_like(batch_ids, dtype=bool)
+    total_dc = num_queries * num_database
 
-    return SearchResult(distances=batch_distances, ids=batch_ids)
+    return SearchResult(
+        distances=batch_distances,
+        ids=batch_ids,
+        mask=batch_mask,
+        distance_computations=total_dc,
+        centroid_distance_computations=0,
+        candidate_distance_computations=total_dc,
+    )
 
 
 def generate_ground_truth(
@@ -330,3 +361,20 @@ class ExactFlatIndex:
             SearchResult with `.distances` and `.ids`.
         """
         return exact_search(queries=queries, database=self._database, ids=self._ids, k=k, max_db_chunk=max_db_chunk)
+
+    @property
+    def index_memory_bytes(self) -> int:
+        """Logical storage memory represented by indexed vectors and IDs in bytes."""
+        return int(self._database.shape[0] * (self._database.shape[1] * 4 + 8))
+
+    @property
+    def index_memory_mib(self) -> float:
+        """Logical storage memory in mebibytes (MiB)."""
+        return float(self.index_memory_bytes / (1024.0 * 1024.0))
+
+    @property
+    def bytes_per_vector(self) -> float:
+        """Average logical storage bytes per indexed vector."""
+        if self._database.shape[0] == 0:
+            return 0.0
+        return float(self.index_memory_bytes / self._database.shape[0])

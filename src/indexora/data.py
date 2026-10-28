@@ -497,3 +497,182 @@ def load_dataset(
         train=train,
         train_ids=train_ids,
     )
+
+
+def compute_file_sha256(filepath: str | Path, chunk_size: int = 65536) -> str:
+    """Compute SHA-256 hexadecimal digest of a file in streaming chunks."""
+    path = Path(filepath)
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def read_fvecs(
+    filepath: str | Path,
+    max_vectors: int | None = None,
+) -> np.ndarray:
+    """Read vectors from an .fvecs binary file into a contiguous float32 array.
+
+    The .fvecs format stores consecutive vector records where the first 4 bytes
+    encode the vector dimensionality `d` as a little-endian 32-bit integer, followed
+    by `d` 32-bit floating-point coordinates.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the .fvecs file.
+    max_vectors : int | None, default=None
+        Maximum number of vectors to read from the beginning of the file. If None,
+        reads all vectors in the file. Must be a positive integer if provided.
+
+    Returns
+    -------
+    np.ndarray
+        2D C-contiguous array of shape `(N, d)` with strict `dtype=np.float32`.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    ValueError
+        If the file is empty, truncated, has inconsistent dimensions across records,
+        has non-positive dimension, or contains non-finite numbers (NaN/Inf).
+    TypeError
+        If max_vectors is not an integer.
+    """
+    path = Path(filepath)
+    if not path.exists():
+        raise FileNotFoundError(f"fvecs file not found at: {path}")
+
+    file_size = path.stat().st_size
+    if file_size == 0:
+        raise ValueError(f"fvecs file is empty (0 bytes): {path}")
+
+    if file_size < 4:
+        raise ValueError(f"Malformed fvecs file (size {file_size} bytes is smaller than 4-byte header): {path}")
+
+    with open(path, "rb") as f:
+        dim_bytes = f.read(4)
+    (dim,) = np.frombuffer(dim_bytes, dtype="<i4")
+
+    if dim <= 0:
+        raise ValueError(f"Invalid non-positive vector dimension {dim} in fvecs file: {path}")
+
+    record_size = 4 + 4 * int(dim)
+    if file_size % record_size != 0:
+        raise ValueError(
+            f"Malformed or truncated fvecs file: size {file_size} bytes is not a multiple "
+            f"of record size {record_size} bytes (dim={dim}): {path}"
+        )
+
+    total_vectors = file_size // record_size
+    if max_vectors is not None:
+        if not isinstance(max_vectors, (int, np.integer)):
+            raise TypeError(f"max_vectors must be an integer, got {type(max_vectors).__name__}")
+        if max_vectors <= 0:
+            raise ValueError(f"max_vectors must be a positive integer, got {max_vectors}")
+        n_to_read = min(total_vectors, int(max_vectors))
+    else:
+        n_to_read = total_vectors
+
+    if n_to_read == 0:
+        return np.empty((0, dim), dtype=np.float32)
+
+    record_dtype = np.dtype([("dim", "<i4"), ("vec", "<f4", (dim,))])
+    with open(path, "rb") as f:
+        records = np.fromfile(f, dtype=record_dtype, count=n_to_read)
+
+    if len(records) != n_to_read:
+        raise ValueError(
+            f"Unexpected end of file reading {path}: expected {n_to_read} records, got {len(records)}"
+        )
+
+    if not np.all(records["dim"] == dim):
+        raise ValueError(f"Inconsistent vector dimensions detected across records in {path}")
+
+    vectors = np.ascontiguousarray(records["vec"], dtype=np.float32)
+    if not np.all(np.isfinite(vectors)):
+        raise ValueError(f"fvecs file contains non-finite values (NaN or Inf): {path}")
+
+    return vectors
+
+
+def write_fvecs(
+    filepath: str | Path,
+    vectors: np.ndarray,
+) -> None:
+    """Write a 2D float32 array to an .fvecs binary file."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not isinstance(vectors, np.ndarray) or vectors.dtype != np.float32 or vectors.ndim != 2:
+        raise TypeError("vectors must be a 2D float32 numpy ndarray.")
+
+    N, d = vectors.shape
+    record_dtype = np.dtype([("dim", "<i4"), ("vec", "<f4", (d,))])
+    records = np.empty(N, dtype=record_dtype)
+    records["dim"] = d
+    records["vec"] = vectors
+
+    with open(path, "wb") as f:
+        records.tofile(f)
+
+
+def load_sift_dataset(
+    base_path: str | Path,
+    query_path: str | Path,
+    n_base: int = 100000,
+    n_queries: int = 1000,
+) -> VectorDataset:
+    """Load a SIFT dataset from .fvecs files into a VectorDataset container.
+
+    Parameters
+    ----------
+    base_path : str or Path
+        Path to the base database .fvecs file (e.g. sift_base.fvecs).
+    query_path : str or Path
+        Path to the query .fvecs file (e.g. sift_query.fvecs).
+    n_base : int, default=100000
+        Number of base vectors to read from the prefix of base_path.
+    n_queries : int, default=1000
+        Number of query vectors to read from the prefix of query_path.
+
+    Returns
+    -------
+    VectorDataset
+        Dataset populated with SIFT base and query vectors.
+
+    Raises
+    ------
+    FileNotFoundError
+        If base_path or query_path does not exist, with instructions for acquiring SIFT1M.
+    """
+    b_path = Path(base_path)
+    q_path = Path(query_path)
+
+    if not b_path.exists():
+        raise FileNotFoundError(
+            f"SIFT base file not found at: {b_path}\n"
+            "To acquire SIFT1M, download and extract from the Texmex benchmark:\n"
+            "  curl -O ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz\n"
+            "  tar -xzf sift.tar.gz\n"
+            "Then supply --base-path <path_to_sift_base.fvecs>."
+        )
+
+    if not q_path.exists():
+        raise FileNotFoundError(
+            f"SIFT query file not found at: {q_path}\n"
+            "Please supply the query file (e.g. sift_query.fvecs from SIFT1M)."
+        )
+
+    base = read_fvecs(b_path, max_vectors=n_base)
+    queries = read_fvecs(q_path, max_vectors=n_queries)
+
+    if base.shape[1] != queries.shape[1]:
+        raise ValueError(
+            f"Dimension mismatch between SIFT base ({base.shape[1]}D) and queries ({queries.shape[1]}D)"
+        )
+
+    return VectorDataset(base=base, queries=queries)

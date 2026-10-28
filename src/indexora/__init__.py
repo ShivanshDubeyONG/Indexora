@@ -4,11 +4,15 @@ from indexora.clustering import KMeansResult, kmeans, kmeans_plus_plus
 from indexora.data import (
     ClusteredDataset,
     VectorDataset,
+    compute_file_sha256,
     generate_clustered_dataset,
     generate_synthetic_dataset,
     load_dataset,
+    load_sift_dataset,
     normalize_l2,
+    read_fvecs,
     save_dataset,
+    write_fvecs,
 )
 from indexora.eval import compute_recall_at_k, count_distance_computations
 from indexora.exact import ExactFlatIndex, exact_search, generate_ground_truth
@@ -38,6 +42,10 @@ __all__ = [
     "normalize_l2",
     "save_dataset",
     "load_dataset",
+    "read_fvecs",
+    "write_fvecs",
+    "load_sift_dataset",
+    "compute_file_sha256",
     "KMeansResult",
     "kmeans_plus_plus",
     "kmeans",

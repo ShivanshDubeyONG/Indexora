@@ -277,6 +277,25 @@ class IVFFlatIndex:
             raise IndexError(f"list_id {list_id} out of bounds for nlist={self._nlist}")
         return self._invlists[list_id]
 
+    @property
+    def index_memory_bytes(self) -> int:
+        """Total memory in bytes of coarse centroids and stored inverted lists."""
+        centroid_bytes = int(self._centroids.nbytes)
+        invlists_bytes = sum(int(lst.vectors.nbytes + lst.ids.nbytes) for lst in self._invlists)
+        return centroid_bytes + invlists_bytes
+
+    @property
+    def index_memory_mib(self) -> float:
+        """Total index storage memory in mebibytes (MiB)."""
+        return float(self.index_memory_bytes / (1024.0 * 1024.0))
+
+    @property
+    def bytes_per_vector(self) -> float:
+        """Average storage bytes per indexed vector."""
+        if self._ntotal == 0:
+            return 0.0
+        return float(self.index_memory_bytes / self._ntotal)
+
     def _search_single(
         self,
         query: np.ndarray,
@@ -305,6 +324,10 @@ class IVFFlatIndex:
             return SearchResult(
                 distances=np.empty((0,), dtype=np.float32),
                 ids=np.empty((0,), dtype=np.int64),
+                mask=np.empty((0,), dtype=bool),
+                distance_computations=self._nlist,
+                centroid_distance_computations=self._nlist,
+                candidate_distance_computations=0,
             )
 
         # 4. Concatenate candidate buffers
@@ -317,7 +340,16 @@ class IVFFlatIndex:
         cand_dists = pairwise_squared_l2_ref(query, cand_vecs)
 
         # 6. Top-k selection with deterministic (distance, ID) ordering
-        return select_top_k(cand_dists, cand_ids, k=k)
+        res = select_top_k(cand_dists, cand_ids, k=k)
+        total_dc = self._nlist + len(cand_ids)
+        return SearchResult(
+            distances=res.distances,
+            ids=res.ids,
+            mask=res.mask,
+            distance_computations=total_dc,
+            centroid_distance_computations=self._nlist,
+            candidate_distance_computations=len(cand_ids),
+        )
 
     def search(
         self,
@@ -404,6 +436,10 @@ class IVFFlatIndex:
             return SearchResult(
                 distances=np.empty((0, min(k, self._ntotal)), dtype=np.float32),
                 ids=np.empty((0, min(k, self._ntotal)), dtype=np.int64),
+                mask=np.empty((0, min(k, self._ntotal)), dtype=bool),
+                distance_computations=0,
+                centroid_distance_computations=0,
+                candidate_distance_computations=0,
             )
 
         per_query_results = [
@@ -411,21 +447,40 @@ class IVFFlatIndex:
             for i in range(num_queries)
         ]
 
+        total_dc = sum(
+            r.distance_computations for r in per_query_results if r.distance_computations is not None
+        )
+        total_centroid_dc = sum(
+            r.centroid_distance_computations for r in per_query_results if r.centroid_distance_computations is not None
+        )
+        total_cand_dc = sum(
+            r.candidate_distance_computations for r in per_query_results if r.candidate_distance_computations is not None
+        )
         lengths = [len(r.ids) for r in per_query_results]
         if len(set(lengths)) == 1:
             batch_distances = np.stack([r.distances for r in per_query_results], axis=0)
             batch_ids = np.stack([r.ids for r in per_query_results], axis=0)
+            batch_mask = np.stack([r.mask for r in per_query_results], axis=0)
         else:
-            # Handle uneven candidate counts across queries: pad up to max retrieved with -1 and inf
+            # Handle uneven candidate counts across queries: pad up to max retrieved with -1 and inf, mask=False
             target_k = max(lengths)
             batch_distances = np.full((num_queries, target_k), np.float32(np.inf), dtype=np.float32)
             batch_ids = np.full((num_queries, target_k), np.int64(-1), dtype=np.int64)
+            batch_mask = np.zeros((num_queries, target_k), dtype=bool)
             for i, r in enumerate(per_query_results):
                 L = len(r.ids)
                 batch_distances[i, :L] = r.distances
                 batch_ids[i, :L] = r.ids
+                batch_mask[i, :L] = r.mask
 
-        return SearchResult(distances=batch_distances, ids=batch_ids)
+        return SearchResult(
+            distances=batch_distances,
+            ids=batch_ids,
+            mask=batch_mask,
+            distance_computations=total_dc,
+            centroid_distance_computations=total_centroid_dc,
+            candidate_distance_computations=total_cand_dc,
+        )
 
 
 def ivf_flat_build(

@@ -18,9 +18,12 @@ from indexora import (
     ExactFlatIndex,
     IVFFlatIndex,
     RunMetrics,
+    SearchResult,
     compute_recall_at_k,
     count_distance_computations,
+    exact_search,
     generate_clustered_dataset,
+    generate_ground_truth,
     run_benchmark,
 )
 from indexora.benchmark import main
@@ -356,8 +359,267 @@ def test_benchmark_separation_of_build_and_query_timing():
     for r in result.runs:
         # Build time is recorded
         assert r.build_time_seconds >= 0.0
-        # Query latency is recorded with repeat_runs samples
-        assert len(r.query_latencies_ms) == 3
-        assert r.p50_latency_ms > 0.0
-        assert r.min_latency_ms <= r.p50_latency_ms <= r.max_latency_ms
-        assert r.qps > 0.0
+        # Query latency is recorded with sample count samples
+        assert len(r.query_latencies_ms) == r.per_query_sample_count
+        assert r.per_query_sample_count == 4
+        assert r.per_query_p50_ms > 0.0
+        assert r.per_query_min_ms <= r.per_query_p50_ms <= r.per_query_max_ms
+        assert r.batch_repeat_runs == 3
+        assert r.batch_qps > 0.0
+        assert r.index_memory_bytes > 0
+        assert r.index_memory_mib > 0.0
+        assert r.bytes_per_vector > 0.0
+
+
+# ============================================================================
+# 7. Phase 6.5: -1 ID Correctness vs. Padding Validity
+# ============================================================================
+
+
+def test_real_id_negative_one_exact_search_validity():
+    """Verify that ID -1 is a legitimate entity ID in ExactFlatIndex and is marked valid."""
+    db = np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]], dtype=np.float32)
+    ids = np.array([10, 20, -1], dtype=np.int64)
+    idx = ExactFlatIndex(database=db, ids=ids)
+
+    # Query closest to [-1.0, 0.0] (which has ID -1)
+    q = np.array([-1.0, 0.0], dtype=np.float32)
+    res = idx.search(q, k=1)
+
+    assert res.ids[0] == -1
+    assert res.mask[0] is True or res.mask[0] == 1
+    assert res.distances[0] == pytest.approx(0.0)
+
+
+def test_real_id_negative_one_ivf_recall_hit():
+    """Verify that ID -1 in an IVF-Flat index is a valid entity and counts as a recall hit."""
+    db = np.array([[0.0, 0.0], [5.0, 5.0]], dtype=np.float32)
+    ids = np.array([-1, 42], dtype=np.int64)
+    idx = IVFFlatIndex(database=db, nlist=2, ids=ids, centroids=db)
+
+    gt = generate_ground_truth(queries=db, database=db, ids=ids, k=1)
+    assert gt.ids[0, 0] == -1
+    assert gt.mask[0, 0] is True or gt.mask[0, 0] == 1
+
+    res = idx.search(db, k=1, nprobe=2)
+    assert res.ids[0, 0] == -1
+    assert res.mask[0, 0] is True or res.mask[0, 0] == 1
+
+    # compute_recall_at_k using SearchResult directly
+    recall = compute_recall_at_k(res, gt, k=1)
+    assert recall == 1.0
+
+
+def test_padding_sentinels_distinguished_from_real_negative_one():
+    """Verify that explicit SearchResult mask distinguishes real ID -1 from padded slots."""
+    # Query 0 retrieved valid ID -1 and valid ID 10
+    # Query 1 retrieved valid ID 20, followed by a padded slot (marked mask=False)
+    # Even though both use ID value -1, slot 1 in query 1 is padding!
+    ret_ids = np.array([[-1, 10], [20, -1]], dtype=np.int64)
+    ret_dists = np.array([[0.1, 0.2], [0.3, np.inf]], dtype=np.float32)
+    ret_mask = np.array([[True, True], [True, False]], dtype=bool)
+    ret_res = SearchResult(distances=ret_dists, ids=ret_ids, mask=ret_mask)
+
+    # Ground truth: query 0 has [-1, 10], query 1 has [20, 30]
+    gt_ids = np.array([[-1, 10], [20, 30]], dtype=np.int64)
+    gt_dists = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)
+    gt_res = SearchResult(distances=gt_dists, ids=gt_ids)
+
+    # Query 0 matched 2/2 (including real -1!) -> recall 1.0
+    # Query 1 matched 1/2 ([20], padded -1 is excluded) -> recall 0.5
+    # Overall recall = (1.0 + 0.5) / 2 = 0.75
+    recall = compute_recall_at_k(ret_res, gt_res, k=2)
+    assert recall == pytest.approx(0.75)
+
+
+def test_mixed_batch_uneven_candidates_preserves_validity_mask():
+    """Verify that batched IVF search sets mask=False only for padded missing candidate slots."""
+    # 2 clusters: cluster 0 has 1 vector, cluster 1 has 3 vectors
+    db = np.array([[0.0, 0.0], [10.0, 10.0], [10.1, 10.1], [10.2, 10.2]], dtype=np.float32)
+    ids = np.array([100, 201, 202, 203], dtype=np.int64)
+    centroids = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=np.float32)
+    idx = IVFFlatIndex(database=db, nlist=2, ids=ids, centroids=centroids)
+
+    # Query 0 close to cluster 0 (probes list 0 with nprobe=1 -> 1 candidate)
+    # Query 1 close to cluster 1 (probes list 1 with nprobe=1 -> 3 candidates)
+    queries = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=np.float32)
+    res = idx.search(queries, k=3, nprobe=1)
+
+    assert res.ids.shape == (2, 3)
+    assert res.mask.shape == (2, 3)
+
+    # Query 0 retrieved 1 vector, padded 2 slots
+    assert res.mask[0, 0] is True or res.mask[0, 0] == 1
+    assert not res.mask[0, 1]
+    assert not res.mask[0, 2]
+
+    # Query 1 retrieved 3 vectors, all valid
+    assert np.all(res.mask[1])
+
+
+# ============================================================================
+# 8. Phase 6.5: Index Storage Memory and Actual Distance Work
+# ============================================================================
+
+
+def test_index_storage_memory_accounting():
+    """Verify exact formula for index storage bytes, MiB, and bytes per vector."""
+    N = 100
+    d = 16
+    db = np.ones((N, d), dtype=np.float32)
+    ids = np.arange(N, dtype=np.int64)
+
+    # Exact index storage: N * (d * 4 + 8) = 100 * (64 + 8) = 7,200 bytes
+    exact_idx = ExactFlatIndex(database=db, ids=ids)
+    expected_exact_bytes = N * (d * 4 + 8)
+    assert exact_idx.index_memory_bytes == expected_exact_bytes
+    assert exact_idx.index_memory_mib == expected_exact_bytes / (1024 * 1024)
+    assert exact_idx.bytes_per_vector == (d * 4 + 8)
+
+    # IVF index storage: nlist * d * 4 + N * (d * 4 + 8) = 5 * 64 + 7,200 = 7,520 bytes
+    nlist = 5
+    ivf_idx = IVFFlatIndex(database=db, nlist=nlist, ids=ids, seed=42)
+    expected_ivf_bytes = nlist * d * 4 + N * (d * 4 + 8)
+    assert ivf_idx.index_memory_bytes == expected_ivf_bytes
+    assert ivf_idx.index_memory_mib == expected_ivf_bytes / (1024 * 1024)
+    assert ivf_idx.bytes_per_vector == float(expected_ivf_bytes / N)
+
+
+def test_search_path_distance_computation_instrumentation():
+    """Verify that reported distance computations reflect actual search path work."""
+    N = 40
+    d = 4
+    db = np.ones((N, d), dtype=np.float32)
+    q = np.ones((2, d), dtype=np.float32)
+    exact_idx = ExactFlatIndex(database=db)
+
+    # Exact search on 2 queries against 40 database vectors -> 80 total, 40 per query
+    exact_res = exact_idx.search(q, k=5)
+    assert exact_res.distance_computations == 80
+    assert count_distance_computations(exact_idx, q) == 40.0
+
+    # IVF search with nlist=4
+    ivf_idx = IVFFlatIndex(database=db, nlist=4, seed=42)
+    # All-probe (nprobe=4) -> each query computes 4 coarse + 40 candidates = 44
+    # 2 queries -> total 88
+    all_res = ivf_idx.search(q, k=5, nprobe=4)
+    assert all_res.distance_computations == 88
+    assert count_distance_computations(ivf_idx, q, nprobe=4) == 44.0
+
+
+def test_benchmark_cli_sift_missing_args():
+    """Verify CLI returns exit code 1 when --dataset sift_fvecs is used without paths."""
+    ret = main(["--dataset", "sift_fvecs"])
+    assert ret == 1
+
+
+def test_ivf_all_probe_exact_equivalence_negative_one_and_ties():
+    """Verify bit-for-bit equivalence between all-probe IVF and exact search with ID -1 and distance ties."""
+    db = np.array(
+        [
+            [1.0, 1.0],   # ID 10
+            [2.0, 2.0],   # ID -1 (tied distance with ID -50)
+            [2.0, 2.0],   # ID -50 (tied distance with ID -1)
+            [3.0, 3.0],   # ID 100
+        ],
+        dtype=np.float32,
+    )
+    ids = np.array([10, -1, -50, 100], dtype=np.int64)
+    queries = np.array([[2.0, 2.0], [0.0, 0.0]], dtype=np.float32)
+
+    ivf = IVFFlatIndex(database=db, nlist=3, ids=ids, seed=42)
+    ivf_res = ivf.search(queries, k=4, nprobe=3)
+    exact_res = exact_search(queries, db, ids=ids, k=4)
+
+    np.testing.assert_array_equal(ivf_res.ids, exact_res.ids)
+    np.testing.assert_allclose(ivf_res.distances, exact_res.distances)
+    np.testing.assert_array_equal(ivf_res.mask, exact_res.mask)
+    # Check that ID -1 is present and valid
+    assert -1 in ivf_res.ids[0]
+    assert np.all(ivf_res.mask)
+
+
+def test_exact_search_empty_queries_and_db_distance_computations():
+    """Verify exact_search records distance_computations=0 for empty queries or empty database."""
+    db = np.ones((10, 4), dtype=np.float32)
+    empty_q = np.empty((0, 4), dtype=np.float32)
+    res_eq = exact_search(empty_q, db, k=5)
+    assert res_eq.distance_computations == 0
+
+    empty_db = np.empty((0, 4), dtype=np.float32)
+    q = np.ones((3, 4), dtype=np.float32)
+    res_edb = exact_search(q, empty_db, k=5)
+    assert res_edb.distance_computations == 0
+
+
+def test_benchmark_cli_no_plot_flag(tmp_path: Path):
+    """Verify CLI --no-plot flag avoids plot generation and exits cleanly."""
+    out_dir = str(tmp_path / "cli_no_plot")
+    ret_code = main(["--smoke", "--no-plot", "--output-dir", out_dir])
+    assert ret_code == 0
+    assert (Path(out_dir) / "benchmark_results.json").exists()
+    assert (Path(out_dir) / "benchmark_summary.csv").exists()
+    assert not (Path(out_dir) / "recall_vs_latency.png").exists()
+
+
+def test_benchmark_cli_plot_failure_exits_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify CLI exits with code 1 when plot generation fails and --no-plot was not passed."""
+    out_dir = str(tmp_path / "cli_plot_fail")
+
+    def mock_plot(self, path):
+        raise RuntimeError("Simulated missing matplotlib dependency")
+
+    monkeypatch.setattr(BenchmarkResult, "plot", mock_plot)
+    ret_code = main(["--smoke", "--output-dir", out_dir])
+    assert ret_code == 1
+
+
+def test_deterministic_distance_computation_counts_mathematical_oracle():
+    """Verify mathematically exact distance computation breakdown with N=200, Q=20, nlist=5."""
+    N = 200
+    Q = 20
+    d = 4
+    nlist = 5
+    centroids = np.zeros((nlist, d), dtype=np.float32)
+    for c_idx in range(nlist):
+        centroids[c_idx] = float(c_idx * 100)
+
+    db_list = []
+    ids_list = []
+    for c_idx in range(nlist):
+        cluster_vecs = np.full((40, d), float(c_idx * 100), dtype=np.float32)
+        cluster_ids = np.arange(c_idx * 40, (c_idx + 1) * 40, dtype=np.int64)
+        db_list.append(cluster_vecs)
+        ids_list.append(cluster_ids)
+    database = np.concatenate(db_list, axis=0)
+    ids = np.concatenate(ids_list, axis=0)
+
+    query_list = []
+    for c_idx in range(nlist):
+        query_list.append(np.full((4, d), float(c_idx * 100), dtype=np.float32))
+    queries = np.concatenate(query_list, axis=0)
+
+    # 1. Exact Flat verification
+    exact_idx = ExactFlatIndex(database=database, ids=ids)
+    exact_res = exact_idx.search(queries, k=5)
+    assert exact_res.distance_computations == 4000
+    assert exact_res.centroid_distance_computations == 0
+    assert exact_res.candidate_distance_computations == 4000
+
+    # 2. IVF-Flat with nprobe=1 (each query probes exactly 1 list of size 40)
+    ivf_idx = IVFFlatIndex(database=database, nlist=nlist, ids=ids, centroids=centroids)
+    ivf_p1_res = ivf_idx.search(queries, k=5, nprobe=1)
+    assert ivf_p1_res.centroid_distance_computations == 100
+    assert ivf_p1_res.candidate_distance_computations == 800
+    assert ivf_p1_res.distance_computations == 900
+
+    # 3. IVF-Flat with nprobe=5 (all-probe: probes all 5 lists of total size 200)
+    ivf_all_res = ivf_idx.search(queries, k=5, nprobe=5)
+    assert ivf_all_res.centroid_distance_computations == 100
+    assert ivf_all_res.candidate_distance_computations == 4000
+    assert ivf_all_res.distance_computations == 4100
+
+    # Bit-for-bit all-probe equivalence to exact search
+    np.testing.assert_array_equal(ivf_all_res.ids, exact_res.ids)
+    np.testing.assert_allclose(ivf_all_res.distances, exact_res.distances)
+    np.testing.assert_array_equal(ivf_all_res.mask, exact_res.mask)

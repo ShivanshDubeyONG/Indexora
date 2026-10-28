@@ -337,3 +337,127 @@ def test_compatibility_with_exact_search():
 
     np.testing.assert_array_equal(search_res.ids, index_res.ids)
     np.testing.assert_array_equal(search_res.distances, index_res.distances)
+
+
+# ============================================================================
+# .fvecs Binary Format and SIFT Dataset Loader Tests
+# ============================================================================
+
+
+def test_fvecs_round_trip(tmp_path: Path):
+    """Verify write_fvecs and read_fvecs preserve exact shapes and float32 values."""
+    from indexora.data import compute_file_sha256, read_fvecs, write_fvecs
+
+    vecs = np.random.default_rng(42).standard_normal((25, 16)).astype(np.float32)
+    fvecs_path = tmp_path / "test_vectors.fvecs"
+
+    write_fvecs(fvecs_path, vecs)
+    assert fvecs_path.exists()
+    assert fvecs_path.stat().st_size == 25 * (4 + 16 * 4)
+
+    loaded = read_fvecs(fvecs_path)
+    assert loaded.shape == (25, 16)
+    assert loaded.dtype == np.float32
+    assert loaded.flags.c_contiguous
+    np.testing.assert_array_equal(loaded, vecs)
+
+    # Test streaming sha256 helper
+    h = compute_file_sha256(fvecs_path)
+    assert isinstance(h, str) and len(h) == 64
+
+
+def test_fvecs_partial_read(tmp_path: Path):
+    """Verify read_fvecs max_vectors limits records read without reading whole file."""
+    from indexora.data import read_fvecs, write_fvecs
+
+    vecs = np.arange(50 * 8, dtype=np.float32).reshape(50, 8)
+    fvecs_path = tmp_path / "fifty_vectors.fvecs"
+    write_fvecs(fvecs_path, vecs)
+
+    # Read first 10 vectors
+    loaded_10 = read_fvecs(fvecs_path, max_vectors=10)
+    assert loaded_10.shape == (10, 8)
+    np.testing.assert_array_equal(loaded_10, vecs[:10])
+
+    # max_vectors exceeding total vectors returns all available
+    loaded_all = read_fvecs(fvecs_path, max_vectors=100)
+    assert loaded_all.shape == (50, 8)
+    np.testing.assert_array_equal(loaded_all, vecs)
+
+
+def test_fvecs_validation_errors(tmp_path: Path):
+    """Verify read_fvecs rejects malformed, truncated, empty, and invalid files."""
+    from indexora.data import read_fvecs, write_fvecs
+
+    # Missing file
+    with pytest.raises(FileNotFoundError):
+        read_fvecs(tmp_path / "nonexistent.fvecs")
+
+    # Empty file
+    empty_path = tmp_path / "empty.fvecs"
+    empty_path.write_bytes(b"")
+    with pytest.raises(ValueError, match="empty"):
+        read_fvecs(empty_path)
+
+    # Smaller than 4 bytes
+    tiny_path = tmp_path / "tiny.fvecs"
+    tiny_path.write_bytes(b"\x04\x00")
+    with pytest.raises(ValueError, match="smaller than 4-byte header"):
+        read_fvecs(tiny_path)
+
+    # Non-positive dimension
+    zero_dim_path = tmp_path / "zero_dim.fvecs"
+    zero_dim_path.write_bytes(np.int32(0).tobytes() + b"\x00" * 16)
+    with pytest.raises(ValueError, match="non-positive"):
+        read_fvecs(zero_dim_path)
+
+    # Truncated record (record size for d=4 is 20 bytes; provide 25 bytes)
+    trunc_path = tmp_path / "trunc.fvecs"
+    trunc_path.write_bytes(np.int32(4).tobytes() + np.ones(4, dtype=np.float32).tobytes() + b"\x04\x00")
+    with pytest.raises(ValueError, match="not a multiple of record size"):
+        read_fvecs(trunc_path)
+
+    # Inconsistent dimension across records
+    bad_dim_path = tmp_path / "inconsistent.fvecs"
+    rec1 = np.int32(4).tobytes() + np.ones(4, dtype=np.float32).tobytes()
+    rec2 = np.int32(5).tobytes() + np.ones(4, dtype=np.float32).tobytes()  # wrong dim header
+    bad_dim_path.write_bytes(rec1 + rec2)
+    with pytest.raises(ValueError, match="Inconsistent vector dimension"):
+        read_fvecs(bad_dim_path)
+
+    # Invalid max_vectors
+    valid_path = tmp_path / "valid.fvecs"
+    write_fvecs(valid_path, np.ones((5, 2), dtype=np.float32))
+    with pytest.raises(TypeError, match="integer"):
+        read_fvecs(valid_path, max_vectors="five")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="positive"):
+        read_fvecs(valid_path, max_vectors=0)
+
+
+def test_load_sift_dataset_with_fixtures(tmp_path: Path):
+    """Verify load_sift_dataset loads base and queries into a valid VectorDataset."""
+    from indexora.data import load_sift_dataset, write_fvecs
+
+    base_path = tmp_path / "sift_base.fvecs"
+    query_path = tmp_path / "sift_query.fvecs"
+
+    base_vecs = np.random.default_rng(1).standard_normal((100, 16)).astype(np.float32)
+    query_vecs = np.random.default_rng(2).standard_normal((10, 16)).astype(np.float32)
+
+    write_fvecs(base_path, base_vecs)
+    write_fvecs(query_path, query_vecs)
+
+    ds = load_sift_dataset(base_path, query_path, n_base=50, n_queries=5)
+    assert ds.n_base == 50
+    assert ds.n_queries == 5
+    assert ds.d == 16
+    np.testing.assert_array_equal(ds.base, base_vecs[:50])
+    np.testing.assert_array_equal(ds.queries, query_vecs[:5])
+
+
+def test_load_sift_dataset_missing_file_helpful_error(tmp_path: Path):
+    """Verify load_sift_dataset provides helpful acquisition instructions when files are missing."""
+    from indexora.data import load_sift_dataset
+
+    with pytest.raises(FileNotFoundError, match="sift.tar.gz"):
+        load_sift_dataset(tmp_path / "missing_base.fvecs", tmp_path / "query.fvecs")
