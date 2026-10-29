@@ -188,6 +188,18 @@ works. Tag v0.1 only after the gate passes.
 Verified with 146 passing tests and full SIFT-100k real-data evaluation (N=100,000, Q=1,000, d=128).
 Annotated release tag `v0.1` published with attached benchmark manifest, CSV summary, and trade-off plots.
 
+### Phase 6.6 --- Performance baseline and benchmark credibility (AGENT-ASSISTED)
+
+Audit and stabilize benchmark methodology before Phase 7 reference adapters:
+1. Fast exact search baseline (`exact_search_blas`, `ExactBlasIndex`, `pairwise_squared_l2_blas`) implementing $\|x-y\|^2 = \|x\|^2 + \|y\|^2 - 2(x \cdot y)$ with floating-point negative round-off clipping to zero. The direct coordinate-difference kernel remains the canonical reference oracle.
+2. Vectorized BLAS cluster assignment in K-means training and coarse quantization while preserving K-means++ initialization, Lloyd iteration, and deterministic tie policies.
+3. Bounded batch query memory via `max_query_chunk=1024` to prevent unbounded $(Q, N)$ temporary allocations.
+4. Distance-aware Recall@k metric (`compute_distance_aware_recall_at_k`) resolving equidistant neighbor boundary ties without penalizing approximate search.
+5. Surface K-means convergence statistics (`kmeans_n_iter`, `kmeans_converged`, `kmeans_inertia`).
+6. Benchmarking dual exact baselines (`exact_reference` and `exact_blas`), reporting query latency standard deviation (`per_query_std_ms`), seeded latency query sampling, and tracking OS peak process RSS.
+
+*Status: Complete.* 163 tests passing, verified across smoke and synthetic benchmarks.
+
 ### Phase 7 --- Reference adapters (AGENT-ASSISTED)
 
 Add optional adapters for suitable libraries such as FAISS or hnswlib.

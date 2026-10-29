@@ -13,7 +13,7 @@ from typing import Sequence
 import numpy as np
 
 from indexora.clustering import kmeans
-from indexora.kernels import pairwise_squared_l2_ref
+from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
 from indexora.topk import SearchResult, select_top_k
 
 
@@ -197,20 +197,27 @@ class IVFFlatIndex:
                 tol=tol,
                 seed=seed,
                 empty_cluster_policy="reseed_furthest",
+                distance_method="blas",
             )
             self._centroids = np.ascontiguousarray(km_res.centroids, dtype=np.float32)
+            self._kmeans_n_iter = km_res.n_iter
+            self._kmeans_converged = km_res.converged
+            self._kmeans_inertia = km_res.inertia
         else:
             validated_c = _validate_centroids(centroids, expected_nlist=nlist, expected_d=d)
             # Defensive copy ensures caller cannot mutate internal centroid representation
             self._centroids = np.ascontiguousarray(validated_c.copy(), dtype=np.float32)
+            self._kmeans_n_iter = None
+            self._kmeans_converged = None
+            self._kmeans_inertia = None
 
         # 2. Coarse Quantization: assign each database vector to nearest coarse centroid
         # Uses bounded database blocks to avoid allocating an unconstrained (N, nlist) matrix
         assignments = np.empty(N, dtype=np.int64)
-        assign_block_size = 10000
+        assign_block_size = 32768
         for b_start in range(0, N, assign_block_size):
             b_end = min(b_start + assign_block_size, N)
-            block_dists = pairwise_squared_l2_ref(database[b_start:b_end], self._centroids)
+            block_dists = pairwise_squared_l2_blas(database[b_start:b_end], self._centroids)
             # Deterministic tie-breaking: np.argmin selects lowest centroid index on equal distance
             assignments[b_start:b_end] = np.argmin(block_dists, axis=1)
 
@@ -259,6 +266,21 @@ class IVFFlatIndex:
     def centroids(self) -> np.ndarray:
         """Coarse centroids of shape `(nlist, d)` with `dtype=np.float32`."""
         return self._centroids.copy()
+
+    @property
+    def kmeans_n_iter(self) -> int | None:
+        """Number of k-means iterations executed during centroid training (None if centroids pre-supplied)."""
+        return self._kmeans_n_iter
+
+    @property
+    def kmeans_converged(self) -> bool | None:
+        """Whether k-means training converged before max_iter (None if centroids pre-supplied)."""
+        return self._kmeans_converged
+
+    @property
+    def kmeans_inertia(self) -> float | None:
+        """Final k-means inertia after centroid training (None if centroids pre-supplied)."""
+        return self._kmeans_inertia
 
     @property
     def invlists(self) -> tuple[InvertedList, ...]:

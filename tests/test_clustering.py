@@ -539,3 +539,21 @@ def test_kmeans_on_synthetic_clustered_dataset() -> None:
         assert len(np.unique(true_labels)) == 1, (
             f"Cluster {cluster_id} contains mixed true labels: {np.unique(true_labels)}"
         )
+
+
+def test_kmeans_distance_method_blas_and_reference():
+    """Verify distance_method parameter accepts 'blas' and 'reference' with equivalent behavior."""
+    rng = np.random.default_rng(123)
+    X = rng.standard_normal((60, 4)).astype(np.float32)
+
+    res_blas = kmeans(X, k=3, max_iter=20, distance_method="blas", seed=42)
+    res_ref = kmeans(X, k=3, max_iter=20, distance_method="reference", seed=42)
+
+    assert res_blas.converged == res_ref.converged
+    assert res_blas.n_iter == res_ref.n_iter
+    np.testing.assert_allclose(res_blas.centroids, res_ref.centroids, rtol=1e-4, atol=1e-4)
+    np.testing.assert_array_equal(res_blas.labels, res_ref.labels)
+
+    # Invalid distance method raises ValueError
+    with pytest.raises(ValueError, match="Unknown distance_method"):
+        kmeans(X, k=3, distance_method="euclidean")

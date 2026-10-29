@@ -9,9 +9,11 @@ import numpy as np
 import pytest
 
 from indexora import (
+    ExactBlasIndex,
     ExactFlatIndex,
     SearchResult,
     exact_search,
+    exact_search_blas,
     generate_ground_truth,
     pairwise_squared_l2_ref,
     select_top_k,
@@ -434,3 +436,84 @@ def test_exact_search_incremental_edge_cases_comprehensive():
     res_batch_full = exact_search(q_batch, database, ids=ids, k=10, max_db_chunk=1000)
     np.testing.assert_array_equal(res_batch_chunk.ids, res_batch_full.ids)
     np.testing.assert_allclose(res_batch_chunk.distances, res_batch_full.distances)
+
+
+# ============================================================================
+# Phase 6.6: Fast BLAS-Accelerated Exact Search & Query Chunking Tests
+# ============================================================================
+
+
+def test_exact_search_blas_parity_with_reference():
+    """Verify exact_search_blas returns identical neighbor IDs and distances as exact_search."""
+    rng = np.random.default_rng(42)
+    N, d, Q = 100, 16, 10
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    queries = rng.standard_normal((Q, d)).astype(np.float32)
+    ids = np.arange(1000, 1000 + N, dtype=np.int64)
+
+    ref_res = exact_search(queries, database, ids=ids, k=10)
+    blas_res = exact_search_blas(queries, database, ids=ids, k=10)
+
+    np.testing.assert_array_equal(blas_res.ids, ref_res.ids)
+    np.testing.assert_allclose(blas_res.distances, ref_res.distances, rtol=1e-4, atol=1e-4)
+    np.testing.assert_array_equal(blas_res.mask, ref_res.mask)
+    assert blas_res.distance_computations == Q * N
+
+
+def test_exact_blas_index_interface_and_properties():
+    """Verify ExactBlasIndex provides identical memory, search single, and search batch behavior."""
+    rng = np.random.default_rng(101)
+    N, d = 50, 8
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    ids = np.arange(N, dtype=np.int64)
+
+    idx_ref = ExactFlatIndex(database, ids=ids)
+    idx_blas = ExactBlasIndex(database, ids=ids)
+
+    assert idx_blas.index_memory_bytes == idx_ref.index_memory_bytes
+    assert idx_blas.index_memory_mib == idx_ref.index_memory_mib
+    assert idx_blas.bytes_per_vector == idx_ref.bytes_per_vector
+    assert idx_blas.database.shape == (N, d)
+
+    # Single search
+    q_single = rng.standard_normal(d).astype(np.float32)
+    res_ref_s = idx_ref.search(q_single, k=5)
+    res_blas_s = idx_blas.search(q_single, k=5)
+    np.testing.assert_array_equal(res_blas_s.ids, res_ref_s.ids)
+    np.testing.assert_allclose(res_blas_s.distances, res_ref_s.distances, rtol=1e-4, atol=1e-4)
+
+    # Batch search
+    q_batch = rng.standard_normal((5, d)).astype(np.float32)
+    res_ref_b = idx_ref.search(q_batch, k=5)
+    res_blas_b = idx_blas.search(q_batch, k=5)
+    np.testing.assert_array_equal(res_blas_b.ids, res_ref_b.ids)
+    np.testing.assert_allclose(res_blas_b.distances, res_ref_b.distances, rtol=1e-4, atol=1e-4)
+
+
+def test_exact_search_query_chunking_bounds():
+    """Verify max_query_chunk parameter bounds query batching without altering results."""
+    rng = np.random.default_rng(202)
+    N, d, Q = 80, 8, 25
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    queries = rng.standard_normal((Q, d)).astype(np.float32)
+
+    # Reference exact search across different query chunk sizes
+    res_q1 = exact_search(queries, database, k=5, max_query_chunk=1)
+    res_q7 = exact_search(queries, database, k=5, max_query_chunk=7)
+    res_full = exact_search(queries, database, k=5, max_query_chunk=1000)
+
+    np.testing.assert_array_equal(res_q1.ids, res_full.ids)
+    np.testing.assert_array_equal(res_q7.ids, res_full.ids)
+
+    # BLAS exact search across different query chunk sizes
+    res_blas_q2 = exact_search_blas(queries, database, k=5, max_query_chunk=2)
+    res_blas_full = exact_search_blas(queries, database, k=5, max_query_chunk=1000)
+
+    np.testing.assert_array_equal(res_blas_q2.ids, res_blas_full.ids)
+    np.testing.assert_array_equal(res_blas_q2.ids, res_full.ids)
+
+    # Validation errors on invalid max_query_chunk
+    with pytest.raises(ValueError, match="max_query_chunk must be a positive integer"):
+        exact_search(queries, database, max_query_chunk=0)
+    with pytest.raises(ValueError, match="max_query_chunk must be a positive integer"):
+        exact_search_blas(queries, database, max_query_chunk=-3)

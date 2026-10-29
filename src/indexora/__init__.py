@@ -14,15 +14,25 @@ from indexora.data import (
     save_dataset,
     write_fvecs,
 )
-from indexora.eval import compute_recall_at_k, count_distance_computations
-from indexora.exact import ExactFlatIndex, exact_search, generate_ground_truth
+from indexora.eval import (
+    compute_distance_aware_recall_at_k,
+    compute_recall_at_k,
+    count_distance_computations,
+)
+from indexora.exact import (
+    ExactBlasIndex,
+    ExactFlatIndex,
+    exact_search,
+    exact_search_blas,
+    generate_ground_truth,
+)
 from indexora.ivf import (
     InvertedList,
     IVFFlatIndex,
     ivf_flat_build,
     ivf_flat_search,
 )
-from indexora.kernels import pairwise_squared_l2_ref
+from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
 from indexora.topk import SearchResult, select_top_k
 
 __version__ = "0.1.0.dev0"
@@ -30,10 +40,13 @@ __version__ = "0.1.0.dev0"
 __all__ = [
     "__version__",
     "pairwise_squared_l2_ref",
+    "pairwise_squared_l2_blas",
     "SearchResult",
     "select_top_k",
     "ExactFlatIndex",
+    "ExactBlasIndex",
     "exact_search",
+    "exact_search_blas",
     "generate_ground_truth",
     "VectorDataset",
     "ClusteredDataset",
@@ -54,6 +67,7 @@ __all__ = [
     "ivf_flat_build",
     "ivf_flat_search",
     "compute_recall_at_k",
+    "compute_distance_aware_recall_at_k",
     "count_distance_computations",
     "BenchmarkConfig",
     "RunMetrics",

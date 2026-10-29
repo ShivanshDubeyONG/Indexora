@@ -15,10 +15,12 @@ import pytest
 from indexora import (
     BenchmarkConfig,
     BenchmarkResult,
+    ExactBlasIndex,
     ExactFlatIndex,
     IVFFlatIndex,
     RunMetrics,
     SearchResult,
+    compute_distance_aware_recall_at_k,
     compute_recall_at_k,
     count_distance_computations,
     exact_search,
@@ -26,7 +28,7 @@ from indexora import (
     generate_ground_truth,
     run_benchmark,
 )
-from indexora.benchmark import main
+from indexora.benchmark import _resolve_latency_sample, get_process_peak_rss_bytes, main
 
 
 # ============================================================================
@@ -198,28 +200,39 @@ def test_run_benchmark_end_to_end(tmp_path: Path):
     result = run_benchmark(dataset=data.dataset, config=config, verbose=False)
 
     assert isinstance(result, BenchmarkResult)
-    assert len(result.runs) == 3  # exact, ivf(p=1), ivf(p=3)
+    assert len(result.runs) == 4  # exact_reference, exact_blas, ivf(p=1), ivf(p=3)
 
-    # 1. Exact run verification
-    exact_run = result.runs[0]
-    assert exact_run.index_name == "exact"
-    assert exact_run.recall_at_k == 1.0
-    assert exact_run.distance_computations_per_query == 60.0
-    assert exact_run.p50_latency_ms > 0.0
-    assert exact_run.qps > 0.0
+    # 1. Exact Reference and BLAS run verification
+    exact_ref_run = result.runs[0]
+    assert exact_ref_run.index_name == "exact_reference"
+    assert exact_ref_run.recall_at_k == 1.0
+    assert exact_ref_run.distance_aware_recall_at_k == 1.0
+    assert exact_ref_run.distance_computations_per_query == 60.0
+    assert exact_ref_run.p50_latency_ms > 0.0
+    assert exact_ref_run.qps > 0.0
+
+    exact_blas_run = result.runs[1]
+    assert exact_blas_run.index_name == "exact_blas"
+    assert exact_blas_run.recall_at_k == 1.0
+    assert exact_blas_run.distance_aware_recall_at_k == 1.0
+    assert exact_blas_run.distance_computations_per_query == 60.0
+    assert exact_blas_run.p50_latency_ms > 0.0
+    assert exact_blas_run.qps > 0.0
 
     # 2. IVF run verification
-    ivf_p1 = result.runs[1]
+    ivf_p1 = result.runs[2]
     assert ivf_p1.index_name == "ivf_flat"
     assert ivf_p1.parameters["nprobe"] == 1
     assert 0.0 <= ivf_p1.recall_at_k <= 1.0
     assert ivf_p1.distance_computations_per_query < 60.0
+    assert ivf_p1.kmeans_n_iter is not None
 
-    ivf_p3 = result.runs[2]
+    ivf_p3 = result.runs[3]
     assert ivf_p3.index_name == "ivf_flat"
     assert ivf_p3.parameters["nprobe"] == 3
     # All-probe must achieve 1.0 recall
     assert ivf_p3.recall_at_k == 1.0
+    assert ivf_p3.distance_aware_recall_at_k == 1.0
     assert ivf_p3.distance_computations_per_query == 63.0  # 3 centroids + 60 vectors
 
     # 3. Export to JSON
@@ -232,7 +245,7 @@ def test_run_benchmark_end_to_end(tmp_path: Path):
     assert "environment" in loaded
     assert "dataset_metadata" in loaded
     assert "runs" in loaded
-    assert len(loaded["runs"]) == 3
+    assert len(loaded["runs"]) == 4
     assert loaded["environment"]["numpy_version"] == np.__version__
 
     # 4. Export to CSV
@@ -241,7 +254,8 @@ def test_run_benchmark_end_to_end(tmp_path: Path):
     assert csv_path.exists()
     content = csv_path.read_text(encoding="utf-8")
     assert "index_name,nlist,nprobe" in content
-    assert "exact" in content
+    assert "exact_reference" in content
+    assert "exact_blas" in content
     assert "ivf_flat" in content
 
     # 5. Plotting (if matplotlib installed)
@@ -623,3 +637,83 @@ def test_deterministic_distance_computation_counts_mathematical_oracle():
     np.testing.assert_array_equal(ivf_all_res.ids, exact_res.ids)
     np.testing.assert_allclose(ivf_all_res.distances, exact_res.distances)
     np.testing.assert_array_equal(ivf_all_res.mask, exact_res.mask)
+
+
+# ============================================================================
+# Phase 6.6: Distance-Aware Recall & Benchmark Enhancements
+# ============================================================================
+
+
+def test_distance_aware_recall_boundary_tie_resolution():
+    """Verify distance-aware recall yields 1.0 when retrieved candidates match distance at rank k."""
+    # Query has 2 candidates at exact distance 1.0, but with different IDs (e.g. 101 and 102)
+    # Ground truth top-1 picked ID 101.
+    # Retrieved top-1 picked ID 102.
+    # Under pure ID recall@1: recall is 0.0.
+    # Under distance-aware recall@1: retrieved item distance 1.0 <= GT max distance 1.0 -> recall is 1.0!
+    gt_res = SearchResult(
+        distances=np.array([[1.0]], dtype=np.float32),
+        ids=np.array([[101]], dtype=np.int64),
+    )
+    ret_res = SearchResult(
+        distances=np.array([[1.0]], dtype=np.float32),
+        ids=np.array([[102]], dtype=np.int64),
+    )
+
+    standard_recall = compute_recall_at_k(ret_res, gt_res, k=1)
+    dist_aware_recall = compute_distance_aware_recall_at_k(ret_res, gt_res, k=1)
+
+    assert standard_recall == 0.0
+    assert dist_aware_recall == 1.0
+
+
+def test_distance_aware_recall_with_inferior_candidate():
+    """Verify distance-aware recall is not inflated when retrieved distance exceeds GT max distance."""
+    gt_res = SearchResult(
+        distances=np.array([[1.0]], dtype=np.float32),
+        ids=np.array([[101]], dtype=np.int64),
+    )
+    # Retrieved item has distance 5.0 (greater than gt threshold 1.0)
+    ret_res = SearchResult(
+        distances=np.array([[5.0]], dtype=np.float32),
+        ids=np.array([[102]], dtype=np.int64),
+    )
+
+    dist_aware_recall = compute_distance_aware_recall_at_k(ret_res, gt_res, k=1)
+    assert dist_aware_recall == 0.0
+
+
+def test_count_distance_computations_exact_blas():
+    """Verify count_distance_computations supports ExactBlasIndex."""
+    db = np.ones((40, 8), dtype=np.float32)
+    q = np.ones((3, 8), dtype=np.float32)
+    idx = ExactBlasIndex(database=db)
+
+    dc = count_distance_computations(idx, q)
+    assert dc == 40.0
+
+
+def test_resolve_latency_sample_deterministic_and_bounded():
+    """Verify _resolve_latency_sample deterministically samples queries."""
+    rng = np.random.default_rng(42)
+    queries = rng.standard_normal((100, 4)).astype(np.float32)
+
+    sample1 = _resolve_latency_sample(queries, sample_count=20, seed=42)
+    sample2 = _resolve_latency_sample(queries, sample_count=20, seed=42)
+    sample_diff_seed = _resolve_latency_sample(queries, sample_count=20, seed=99)
+
+    assert sample1.shape == (20, 4)
+    np.testing.assert_array_equal(sample1, sample2)
+    assert not np.array_equal(sample1, sample_diff_seed)
+
+    # When sample_count >= n_queries, returns original queries
+    full_sample = _resolve_latency_sample(queries, sample_count=200, seed=42)
+    np.testing.assert_array_equal(full_sample, queries)
+
+
+def test_get_process_peak_rss_bytes():
+    """Verify get_process_peak_rss_bytes returns a valid positive integer or None."""
+    rss = get_process_peak_rss_bytes()
+    if rss is not None:
+        assert isinstance(rss, int)
+        assert rss > 0

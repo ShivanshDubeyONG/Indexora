@@ -37,8 +37,8 @@ from indexora.data import (
     generate_clustered_dataset,
     load_sift_dataset,
 )
-from indexora.eval import compute_recall_at_k
-from indexora.exact import ExactFlatIndex, generate_ground_truth
+from indexora.eval import compute_distance_aware_recall_at_k, compute_recall_at_k
+from indexora.exact import ExactBlasIndex, ExactFlatIndex, generate_ground_truth
 from indexora.ivf import IVFFlatIndex
 
 
@@ -50,7 +50,7 @@ class BenchmarkConfig:
     k: int = 10
     warmup_runs: int = 2
     repeat_runs: int = 5
-    latency_samples: int = 100
+    latency_samples: int = 500
     seed: int = 42
     nlist_values: tuple[int, ...] = (10, 50, 100)
     nprobe_values: tuple[int, ...] = (1, 2, 5, 10, 20)
@@ -98,6 +98,12 @@ class RunMetrics:
     batch_repeat_runs: int
     recall_at_k: float
     distance_computations_per_query: float
+    per_query_std_ms: float = 0.0
+    distance_aware_recall_at_k: float = 0.0
+    kmeans_n_iter: int | None = None
+    kmeans_converged: bool | None = None
+    kmeans_inertia: float | None = None
+    peak_process_rss_bytes: int | None = None
     total_distance_computations: int = 0
     total_centroid_distance_computations: int = 0
     total_candidate_distance_computations: int = 0
@@ -130,6 +136,11 @@ class RunMetrics:
         return self.per_query_mean_ms
 
     @property
+    def std_latency_ms(self) -> float:
+        """Backward-compatible alias for per_query_std_ms."""
+        return self.per_query_std_ms
+
+    @property
     def min_latency_ms(self) -> float:
         """Backward-compatible alias for per_query_min_ms."""
         return self.per_query_min_ms
@@ -149,6 +160,25 @@ class RunMetrics:
         """Backward-compatible alias for per_query_latencies_ms."""
         return self.per_query_latencies_ms
 
+    @property
+    def distance_aware_recall(self) -> float:
+        """Backward-compatible alias for distance_aware_recall_at_k."""
+        return self.distance_aware_recall_at_k
+
+    @property
+    def peak_rss_bytes(self) -> int | None:
+        """Process peak RSS in bytes."""
+        return self.peak_process_rss_bytes
+
+    @property
+    def peak_rss_mib(self) -> float:
+        """Process peak RSS in MiB."""
+        return (
+            float(self.peak_process_rss_bytes / (1024 * 1024))
+            if self.peak_process_rss_bytes is not None
+            else 0.0
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert metrics to a standard serializable dictionary."""
         d = asdict(self)
@@ -158,10 +188,13 @@ class RunMetrics:
         d["p95_latency_ms"] = self.p95_latency_ms
         d["p99_latency_ms"] = self.p99_latency_ms
         d["mean_latency_ms"] = self.mean_latency_ms
+        d["std_latency_ms"] = self.std_latency_ms
         d["min_latency_ms"] = self.min_latency_ms
         d["max_latency_ms"] = self.max_latency_ms
         d["qps"] = self.qps
         d["query_latencies_ms"] = list(self.per_query_latencies_ms)
+        d["distance_aware_recall"] = self.distance_aware_recall_at_k
+        d["peak_rss_mib"] = self.peak_rss_mib
         return d
 
 
@@ -203,13 +236,18 @@ class BenchmarkResult:
             "nprobe",
             "build_time_sec",
             "build_peak_mem_mb",
+            "peak_rss_mib",
             "index_mem_mib",
             "bytes_per_vec",
             "per_query_p50_ms",
             "per_query_p95_ms",
             "per_query_mean_ms",
+            "per_query_std_ms",
             "batch_qps",
             "recall_at_k",
+            "dist_aware_recall",
+            "kmeans_n_iter",
+            "kmeans_converged",
             "distance_computations",
             "total_distance_computations",
             "centroid_dist_comps_per_query",
@@ -228,13 +266,22 @@ class BenchmarkResult:
                         "nprobe": params.get("nprobe", "-"),
                         "build_time_sec": f"{r.build_time_seconds:.4f}",
                         "build_peak_mem_mb": f"{r.build_peak_tracemalloc_bytes / (1024 * 1024):.2f}",
+                        "peak_rss_mib": (
+                            f"{r.peak_process_rss_bytes / (1024 * 1024):.2f}"
+                            if r.peak_process_rss_bytes is not None
+                            else "-"
+                        ),
                         "index_mem_mib": f"{r.index_memory_mib:.2f}",
                         "bytes_per_vec": f"{r.bytes_per_vector:.1f}",
                         "per_query_p50_ms": f"{r.per_query_p50_ms:.3f}",
                         "per_query_p95_ms": f"{r.per_query_p95_ms:.3f}",
                         "per_query_mean_ms": f"{r.per_query_mean_ms:.3f}",
+                        "per_query_std_ms": f"{r.per_query_std_ms:.3f}",
                         "batch_qps": f"{r.batch_qps:.1f}",
                         "recall_at_k": f"{r.recall_at_k:.4f}",
+                        "dist_aware_recall": f"{r.distance_aware_recall_at_k:.4f}",
+                        "kmeans_n_iter": str(r.kmeans_n_iter) if r.kmeans_n_iter is not None else "-",
+                        "kmeans_converged": str(r.kmeans_converged) if r.kmeans_converged is not None else "-",
                         "distance_computations": f"{r.distance_computations_per_query:.1f}",
                         "total_distance_computations": f"{r.total_distance_computations}",
                         "centroid_dist_comps_per_query": f"{r.centroid_distance_computations_per_query:.1f}",
@@ -269,7 +316,8 @@ class BenchmarkResult:
         out_dir.mkdir(parents=True, exist_ok=True)
         generated_plots = []
 
-        exact_runs = [r for r in self.runs if r.index_name == "exact"]
+        exact_ref_runs = [r for r in self.runs if r.index_name in ("exact", "exact_reference")]
+        exact_blas_runs = [r for r in self.runs if r.index_name == "exact_blas"]
         ivf_runs = [r for r in self.runs if r.index_name == "ivf_flat"]
 
         nlist_groups: dict[int, list[RunMetrics]] = {}
@@ -283,7 +331,7 @@ class BenchmarkResult:
         k_val = self.config.get("k", 10)
 
         # 1. Plot: Recall@k vs Per-Query p50 Latency (ms)
-        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        fig, ax = plt.subplots(figsize=(9, 5.5))
         for nl, group in sorted(nlist_groups.items()):
             group_sorted = sorted(group, key=lambda x: int(x.parameters.get("nprobe", 0)))
             latencies = [x.per_query_p50_ms for x in group_sorted]
@@ -293,15 +341,27 @@ class BenchmarkResult:
                 p = run.parameters.get("nprobe", "")
                 ax.annotate(f"p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
 
-        if exact_runs:
-            ex = exact_runs[0]
+        if exact_ref_runs:
+            ex = exact_ref_runs[0]
             ax.scatter(
                 [ex.per_query_p50_ms],
                 [ex.recall_at_k],
                 color="red",
                 s=130,
                 marker="*",
-                label=f"Exact Flat (p50={ex.per_query_p50_ms:.2f}ms)",
+                label=f"Exact Flat (Ref) (p50={ex.per_query_p50_ms:.2f}ms)",
+                zorder=5,
+            )
+
+        if exact_blas_runs:
+            ex_b = exact_blas_runs[0]
+            ax.scatter(
+                [ex_b.per_query_p50_ms],
+                [ex_b.recall_at_k],
+                color="purple",
+                s=100,
+                marker="D",
+                label=f"Exact Flat (BLAS) (p50={ex_b.per_query_p50_ms:.2f}ms)",
                 zorder=5,
             )
 
@@ -319,7 +379,7 @@ class BenchmarkResult:
         generated_plots.append(str(plot1_path))
 
         # 2. Plot: Recall@k vs Distance Computations per Query
-        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        fig, ax = plt.subplots(figsize=(9, 5.5))
         for nl, group in sorted(nlist_groups.items()):
             group_sorted = sorted(group, key=lambda x: int(x.parameters.get("nprobe", 0)))
             dcs = [x.distance_computations_per_query for x in group_sorted]
@@ -329,15 +389,27 @@ class BenchmarkResult:
                 p = run.parameters.get("nprobe", "")
                 ax.annotate(f"p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
 
-        if exact_runs:
-            ex = exact_runs[0]
+        if exact_ref_runs:
+            ex = exact_ref_runs[0]
             ax.scatter(
                 [ex.distance_computations_per_query],
                 [ex.recall_at_k],
                 color="red",
                 s=130,
                 marker="*",
-                label=f"Exact Flat (N={int(ex.distance_computations_per_query):,})",
+                label=f"Exact Flat (Ref) (N={int(ex.distance_computations_per_query):,})",
+                zorder=5,
+            )
+
+        if exact_blas_runs:
+            ex_b = exact_blas_runs[0]
+            ax.scatter(
+                [ex_b.distance_computations_per_query],
+                [ex_b.recall_at_k],
+                color="purple",
+                s=100,
+                marker="D",
+                label=f"Exact Flat (BLAS) (N={int(ex_b.distance_computations_per_query):,})",
                 zorder=5,
             )
 
@@ -355,6 +427,61 @@ class BenchmarkResult:
         generated_plots.append(str(plot2_path))
 
         return generated_plots
+
+
+def get_process_peak_rss_bytes() -> int | None:
+    """Return the peak resident set size (RSS) in bytes for the current process, or None."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                    ("PrivateUsage", ctypes.c_size_t),
+                ]
+
+            counters = PROCESS_MEMORY_COUNTERS_EX()
+            counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            fn = ctypes.windll.psapi.GetProcessMemoryInfo
+            fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX), wintypes.DWORD]
+            fn.restype = wintypes.BOOL
+            if fn(handle, ctypes.byref(counters), counters.cb):
+                return int(counters.PeakWorkingSetSize)
+        except Exception:
+            return None
+        return None
+    else:
+        try:
+            import resource
+            usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if sys.platform == "darwin":
+                return int(usage)
+            else:
+                return int(usage * 1024)
+        except Exception:
+            return None
+
+
+def _resolve_latency_sample(queries: np.ndarray, sample_count: int, seed: int = 42) -> np.ndarray:
+    """Deterministically select a subset of queries for per-query latency measurements."""
+    n_queries = queries.shape[0]
+    if sample_count >= n_queries:
+        return queries
+    rng = np.random.default_rng(seed)
+    chosen_indices = np.sort(rng.choice(n_queries, size=sample_count, replace=False))
+    return queries[chosen_indices]
 
 
 def get_environment_metadata() -> dict[str, Any]:
@@ -407,7 +534,7 @@ def _measure_per_query_latency(
     queries_subset: np.ndarray,
     k: int,
     warmup_runs: int,
-) -> tuple[tuple[float, ...], float, float, float, float, float, float, int]:
+) -> tuple[tuple[float, ...], float, float, float, float, float, float, float, int]:
     """Execute warmup and timed individual query searches to collect per-query latency percentiles."""
     num_samples = queries_subset.shape[0]
 
@@ -428,10 +555,11 @@ def _measure_per_query_latency(
     p95 = float(np.percentile(lat_arr, 95))
     p99 = float(np.percentile(lat_arr, 99))
     mean_val = float(np.mean(lat_arr))
+    std_val = float(np.std(lat_arr))
     min_val = float(np.min(lat_arr))
     max_val = float(np.max(lat_arr))
 
-    return tuple(latencies_ms), p50, p95, p99, mean_val, min_val, max_val, num_samples
+    return tuple(latencies_ms), p50, p95, p99, mean_val, std_val, min_val, max_val, num_samples
 
 
 def _measure_batch_throughput(
@@ -516,85 +644,167 @@ def run_benchmark(
     if verbose:
         print(f"  Ground truth ready in {t_gt:.2f}s ({Q} queries against {N:,} vectors).")
 
-    # Resolve latency query sample
-    n_latency_samples = min(config.latency_samples, Q)
-    queries_latency_sample = dataset.queries[:n_latency_samples]
-
-    # 2. Exact Flat Baseline Benchmark
-    if verbose:
-        print("\n[2/3] Benchmarking Exact Flat Index...")
-    tracemalloc.start()
-    t0_b = time.perf_counter()
-    exact_index = ExactFlatIndex(database=dataset.base, ids=dataset.base_ids)
-    exact_build_time = time.perf_counter() - t0_b
-    _, exact_build_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-    # Per-query latency percentiles
-    lats, p50, p95, p99, mean_l, min_l, max_l, sample_count = _measure_per_query_latency(
-        search_single_fn=lambda q, k: exact_index.search(q, k=k),
-        queries_subset=queries_latency_sample,
-        k=config.k,
-        warmup_runs=config.warmup_runs,
+    # Resolve latency query sample deterministically
+    queries_latency_sample = _resolve_latency_sample(
+        dataset.queries, config.latency_samples, seed=config.seed
     )
 
-    # Batch throughput
-    batch_qps, batch_mean_ms = _measure_batch_throughput(
-        search_batch_fn=lambda q, k: exact_index.search(q, k=k),
+    # 2. Exact Flat Baselines Benchmark (Reference and BLAS)
+    if verbose:
+        print("\n[2/4] Benchmarking Exact Flat Reference Index...")
+    tracemalloc.start()
+    t0_ref_b = time.perf_counter()
+    exact_ref_index = ExactFlatIndex(database=dataset.base, ids=dataset.base_ids)
+    exact_ref_build_time = time.perf_counter() - t0_ref_b
+    _, exact_ref_build_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    lats_ref, p50_ref, p95_ref, p99_ref, mean_ref, std_ref, min_ref, max_ref, sample_cnt_ref = (
+        _measure_per_query_latency(
+            search_single_fn=lambda q, k: exact_ref_index.search(q, k=k),
+            queries_subset=queries_latency_sample,
+            k=config.k,
+            warmup_runs=config.warmup_runs,
+        )
+    )
+
+    batch_qps_ref, batch_mean_ms_ref = _measure_batch_throughput(
+        search_batch_fn=lambda q, k: exact_ref_index.search(q, k=k),
         queries=dataset.queries,
         k=config.k,
         warmup_runs=config.warmup_runs,
         repeat_runs=config.repeat_runs,
     )
 
-    # Exact search evaluation against ground truth
-    exact_res = exact_index.search(dataset.queries, k=config.k)
-    exact_recall = compute_recall_at_k(exact_res, gt_result, k=config.k)
-    exact_total_dc = int(exact_res.distance_computations) if exact_res.distance_computations is not None else Q * N
-    exact_total_centroid_dc = int(exact_res.centroid_distance_computations) if exact_res.centroid_distance_computations is not None else 0
-    exact_total_cand_dc = int(exact_res.candidate_distance_computations) if exact_res.candidate_distance_computations is not None else exact_total_dc
-    exact_dc = float(exact_total_dc / Q) if Q > 0 else 0.0
-    exact_centroid_dc = float(exact_total_centroid_dc / Q) if Q > 0 else 0.0
-    exact_cand_dc = float(exact_total_cand_dc / Q) if Q > 0 else 0.0
+    exact_ref_res = exact_ref_index.search(dataset.queries, k=config.k)
+    exact_ref_recall = compute_recall_at_k(exact_ref_res, gt_result, k=config.k)
+    exact_ref_dist_recall = compute_distance_aware_recall_at_k(exact_ref_res, gt_result, k=config.k)
+    ref_total_dc = int(exact_ref_res.distance_computations) if exact_ref_res.distance_computations is not None else Q * N
+    ref_total_centroid_dc = int(exact_ref_res.centroid_distance_computations) if exact_ref_res.centroid_distance_computations is not None else 0
+    ref_total_cand_dc = int(exact_ref_res.candidate_distance_computations) if exact_ref_res.candidate_distance_computations is not None else ref_total_dc
+    ref_dc = float(ref_total_dc / Q) if Q > 0 else 0.0
+    ref_centroid_dc = float(ref_total_centroid_dc / Q) if Q > 0 else 0.0
+    ref_cand_dc = float(ref_total_cand_dc / Q) if Q > 0 else 0.0
+    peak_rss_ref = get_process_peak_rss_bytes()
 
-    exact_metrics = RunMetrics(
-        index_name="exact",
+    exact_ref_metrics = RunMetrics(
+        index_name="exact_reference",
         parameters={},
-        build_time_seconds=exact_build_time,
-        build_peak_tracemalloc_bytes=exact_build_mem,
-        index_memory_bytes=exact_index.index_memory_bytes,
-        index_memory_mib=exact_index.index_memory_mib,
-        bytes_per_vector=exact_index.bytes_per_vector,
-        per_query_latencies_ms=lats,
-        per_query_p50_ms=p50,
-        per_query_p95_ms=p95,
-        per_query_p99_ms=p99,
-        per_query_mean_ms=mean_l,
-        per_query_min_ms=min_l,
-        per_query_max_ms=max_l,
-        per_query_sample_count=sample_count,
-        batch_qps=batch_qps,
-        batch_mean_latency_ms=batch_mean_ms,
+        build_time_seconds=exact_ref_build_time,
+        build_peak_tracemalloc_bytes=exact_ref_build_mem,
+        index_memory_bytes=exact_ref_index.index_memory_bytes,
+        index_memory_mib=exact_ref_index.index_memory_mib,
+        bytes_per_vector=exact_ref_index.bytes_per_vector,
+        per_query_latencies_ms=lats_ref,
+        per_query_p50_ms=p50_ref,
+        per_query_p95_ms=p95_ref,
+        per_query_p99_ms=p99_ref,
+        per_query_mean_ms=mean_ref,
+        per_query_min_ms=min_ref,
+        per_query_max_ms=max_ref,
+        per_query_sample_count=sample_cnt_ref,
+        batch_qps=batch_qps_ref,
+        batch_mean_latency_ms=batch_mean_ms_ref,
         batch_repeat_runs=config.repeat_runs,
-        recall_at_k=exact_recall,
-        distance_computations_per_query=exact_dc,
-        total_distance_computations=exact_total_dc,
-        total_centroid_distance_computations=exact_total_centroid_dc,
-        total_candidate_distance_computations=exact_total_cand_dc,
-        centroid_distance_computations_per_query=exact_centroid_dc,
-        candidate_distance_computations_per_query=exact_cand_dc,
+        recall_at_k=exact_ref_recall,
+        distance_computations_per_query=ref_dc,
+        per_query_std_ms=std_ref,
+        distance_aware_recall_at_k=exact_ref_dist_recall,
+        peak_process_rss_bytes=peak_rss_ref,
+        total_distance_computations=ref_total_dc,
+        total_centroid_distance_computations=ref_total_centroid_dc,
+        total_candidate_distance_computations=ref_total_cand_dc,
+        centroid_distance_computations_per_query=ref_centroid_dc,
+        candidate_distance_computations_per_query=ref_cand_dc,
     )
-    result.runs.append(exact_metrics)
+    result.runs.append(exact_ref_metrics)
 
     if verbose:
         print(
-            f"  Exact Flat: p50={p50:.2f}ms | QPS={batch_qps:.1f} | Recall={exact_recall:.4f} | "
-            f"DC/Q={exact_dc:.0f} (Cand={exact_cand_dc:.0f}) | Storage={exact_index.index_memory_mib:.2f}MiB"
+            f"  Exact Flat (Ref):  p50={p50_ref:.2f}ms (std={std_ref:.2f}ms) | QPS={batch_qps_ref:.1f} | "
+            f"Recall={exact_ref_recall:.4f} | DistRecall={exact_ref_dist_recall:.4f} | "
+            f"DC/Q={ref_dc:.0f} | Storage={exact_ref_index.index_memory_mib:.2f}MiB"
+        )
+
+    if verbose:
+        print("\n[3/4] Benchmarking Exact Flat BLAS Index...")
+    tracemalloc.start()
+    t0_blas_b = time.perf_counter()
+    exact_blas_index = ExactBlasIndex(database=dataset.base, ids=dataset.base_ids)
+    exact_blas_build_time = time.perf_counter() - t0_blas_b
+    _, exact_blas_build_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    lats_blas, p50_blas, p95_blas, p99_blas, mean_blas, std_blas, min_blas, max_blas, sample_cnt_blas = (
+        _measure_per_query_latency(
+            search_single_fn=lambda q, k: exact_blas_index.search(q, k=k),
+            queries_subset=queries_latency_sample,
+            k=config.k,
+            warmup_runs=config.warmup_runs,
+        )
+    )
+
+    batch_qps_blas, batch_mean_ms_blas = _measure_batch_throughput(
+        search_batch_fn=lambda q, k: exact_blas_index.search(q, k=k),
+        queries=dataset.queries,
+        k=config.k,
+        warmup_runs=config.warmup_runs,
+        repeat_runs=config.repeat_runs,
+    )
+
+    exact_blas_res = exact_blas_index.search(dataset.queries, k=config.k)
+    exact_blas_recall = compute_recall_at_k(exact_blas_res, gt_result, k=config.k)
+    exact_blas_dist_recall = compute_distance_aware_recall_at_k(exact_blas_res, gt_result, k=config.k)
+    blas_total_dc = int(exact_blas_res.distance_computations) if exact_blas_res.distance_computations is not None else Q * N
+    blas_total_centroid_dc = int(exact_blas_res.centroid_distance_computations) if exact_blas_res.centroid_distance_computations is not None else 0
+    blas_total_cand_dc = int(exact_blas_res.candidate_distance_computations) if exact_blas_res.candidate_distance_computations is not None else blas_total_dc
+    blas_dc = float(blas_total_dc / Q) if Q > 0 else 0.0
+    blas_centroid_dc = float(blas_total_centroid_dc / Q) if Q > 0 else 0.0
+    blas_cand_dc = float(blas_total_cand_dc / Q) if Q > 0 else 0.0
+    peak_rss_blas = get_process_peak_rss_bytes()
+
+    exact_blas_metrics = RunMetrics(
+        index_name="exact_blas",
+        parameters={},
+        build_time_seconds=exact_blas_build_time,
+        build_peak_tracemalloc_bytes=exact_blas_build_mem,
+        index_memory_bytes=exact_blas_index.index_memory_bytes,
+        index_memory_mib=exact_blas_index.index_memory_mib,
+        bytes_per_vector=exact_blas_index.bytes_per_vector,
+        per_query_latencies_ms=lats_blas,
+        per_query_p50_ms=p50_blas,
+        per_query_p95_ms=p95_blas,
+        per_query_p99_ms=p99_blas,
+        per_query_mean_ms=mean_blas,
+        per_query_min_ms=min_blas,
+        per_query_max_ms=max_blas,
+        per_query_sample_count=sample_cnt_blas,
+        batch_qps=batch_qps_blas,
+        batch_mean_latency_ms=batch_mean_ms_blas,
+        batch_repeat_runs=config.repeat_runs,
+        recall_at_k=exact_blas_recall,
+        distance_computations_per_query=blas_dc,
+        per_query_std_ms=std_blas,
+        distance_aware_recall_at_k=exact_blas_dist_recall,
+        peak_process_rss_bytes=peak_rss_blas,
+        total_distance_computations=blas_total_dc,
+        total_centroid_distance_computations=blas_total_centroid_dc,
+        total_candidate_distance_computations=blas_total_cand_dc,
+        centroid_distance_computations_per_query=blas_centroid_dc,
+        candidate_distance_computations_per_query=blas_cand_dc,
+    )
+    result.runs.append(exact_blas_metrics)
+
+    if verbose:
+        print(
+            f"  Exact Flat (BLAS): p50={p50_blas:.2f}ms (std={std_blas:.2f}ms) | QPS={batch_qps_blas:.1f} | "
+            f"Recall={exact_blas_recall:.4f} | DistRecall={exact_blas_dist_recall:.4f} | "
+            f"DC/Q={blas_dc:.0f} | Storage={exact_blas_index.index_memory_mib:.2f}MiB"
         )
 
     # 3. IVF-Flat Sweeps
     if verbose:
-        print("\n[3/3] Benchmarking IVF-Flat Parameter Sweeps...")
+        print("\n[4/4] Benchmarking IVF-Flat Parameter Sweeps...")
 
     for nlist in config.nlist_values:
         if nlist > N:
@@ -615,12 +825,16 @@ def run_benchmark(
         _, ivf_build_mem = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
+        km_iter = ivf_index.kmeans_n_iter
+        km_conv = ivf_index.kmeans_converged
+        km_inertia = ivf_index.kmeans_inertia
+
         for nprobe in config.nprobe_values:
             if nprobe > nlist:
                 continue
 
             # Per-query latency percentiles
-            lats, p50, p95, p99, mean_l, min_l, max_l, sample_count = _measure_per_query_latency(
+            lats, p50, p95, p99, mean_l, std_l, min_l, max_l, sample_count = _measure_per_query_latency(
                 search_single_fn=lambda q, k: ivf_index.search(q, k=k, nprobe=nprobe),
                 queries_subset=queries_latency_sample,
                 k=config.k,
@@ -639,12 +853,14 @@ def run_benchmark(
             # Evaluate search accuracy against ground truth using actual search execution
             search_res = ivf_index.search(dataset.queries, k=config.k, nprobe=nprobe)
             recall = compute_recall_at_k(search_res, gt_result, k=config.k)
+            dist_aware_rec = compute_distance_aware_recall_at_k(search_res, gt_result, k=config.k)
             ivf_total_dc = int(search_res.distance_computations) if search_res.distance_computations is not None else 0
             ivf_total_centroid_dc = int(search_res.centroid_distance_computations) if search_res.centroid_distance_computations is not None else 0
             ivf_total_cand_dc = int(search_res.candidate_distance_computations) if search_res.candidate_distance_computations is not None else 0
             ivf_dc = float(ivf_total_dc / Q) if Q > 0 else 0.0
             ivf_centroid_dc = float(ivf_total_centroid_dc / Q) if Q > 0 else 0.0
             ivf_cand_dc = float(ivf_total_cand_dc / Q) if Q > 0 else 0.0
+            peak_rss_ivf = get_process_peak_rss_bytes()
 
             run_m = RunMetrics(
                 index_name="ivf_flat",
@@ -667,6 +883,12 @@ def run_benchmark(
                 batch_repeat_runs=config.repeat_runs,
                 recall_at_k=recall,
                 distance_computations_per_query=ivf_dc,
+                per_query_std_ms=std_l,
+                distance_aware_recall_at_k=dist_aware_rec,
+                kmeans_n_iter=km_iter,
+                kmeans_converged=km_conv,
+                kmeans_inertia=km_inertia,
+                peak_process_rss_bytes=peak_rss_ivf,
                 total_distance_computations=ivf_total_dc,
                 total_centroid_distance_computations=ivf_total_centroid_dc,
                 total_candidate_distance_computations=ivf_total_cand_dc,
@@ -677,29 +899,30 @@ def run_benchmark(
 
             if verbose:
                 print(
-                    f"    nprobe={nprobe:<3d} -> Recall@{config.k}={recall:.4f} | "
-                    f"p50={p50:6.2f}ms | QPS={batch_qps:7.1f} | DC/Q={ivf_dc:6.0f} (Cent={ivf_centroid_dc:4.0f}, Cand={ivf_cand_dc:4.0f})"
+                    f"    nprobe={nprobe:<3d} -> Recall@{config.k}={recall:.4f} (DistRec={dist_aware_rec:.4f}) | "
+                    f"p50={p50:6.2f}ms (std={std_l:5.2f}ms) | QPS={batch_qps:7.1f} | "
+                    f"DC/Q={ivf_dc:6.0f} (Cent={ivf_centroid_dc:4.0f}, Cand={ivf_cand_dc:4.0f})"
                 )
 
     if verbose:
-        print("\n" + "=" * 90)
+        print("\n" + "=" * 105)
         print("BENCHMARK SWEEP COMPLETE -- SUMMARY TABLE")
-        print("=" * 90)
+        print("=" * 105)
         print(
-            f"{'Index':<10} {'nlist':<6} {'nprobe':<7} {'Recall@k':<9} "
-            f"{'p50 (ms)':<9} {'QPS':<8} {'Dist/Q':<8} {'Cent/Q':<7} {'Cand/Q':<7} {'Index MiB':<9}"
+            f"{'Index':<16} {'nlist':<6} {'nprobe':<7} {'Recall@k':<9} {'DistRec':<9} "
+            f"{'p50(ms)':<8} {'std(ms)':<8} {'QPS':<7} {'Dist/Q':<8} {'PeakMB':<7}"
         )
-        print("-" * 90)
+        print("-" * 105)
         for r in result.runs:
             nl_str = str(r.parameters.get("nlist", "-"))
             np_str = str(r.parameters.get("nprobe", "-"))
+            peak_mb_str = f"{r.peak_rss_mib:.1f}" if r.peak_process_rss_bytes is not None else "-"
             print(
-                f"{r.index_name:<10} {nl_str:<6} {np_str:<7} {r.recall_at_k:<9.4f} "
-                f"{r.per_query_p50_ms:<9.2f} {r.batch_qps:<8.1f} "
-                f"{r.distance_computations_per_query:<8.1f} {r.centroid_distance_computations_per_query:<7.1f} "
-                f"{r.candidate_distance_computations_per_query:<7.1f} {r.index_memory_mib:<9.2f}"
+                f"{r.index_name:<16} {nl_str:<6} {np_str:<7} {r.recall_at_k:<9.4f} {r.distance_aware_recall_at_k:<9.4f} "
+                f"{r.per_query_p50_ms:<8.2f} {r.per_query_std_ms:<8.2f} {r.batch_qps:<7.1f} "
+                f"{r.distance_computations_per_query:<8.1f} {peak_mb_str:<7}"
             )
-        print("=" * 90)
+        print("=" * 105)
 
     return result
 
@@ -730,7 +953,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--latency-samples",
         type=int,
-        default=100,
+        default=500,
         help="Number of individual queries sampled for per-query latency percentiles",
     )
     parser.add_argument("--no-plot", action="store_true", help="Skip generating plot images")

@@ -677,3 +677,24 @@ def test_ivf_flat_recall_ignores_sentinel_padding_adversarial():
         else:
             assert clean_retrieved == {2, 3, 4}
             assert len(clean_retrieved) == 3
+
+
+def test_ivf_flat_kmeans_convergence_metadata_properties() -> None:
+    """Verify IVFFlatIndex exposes kmeans_n_iter, kmeans_converged, and kmeans_inertia."""
+    rng = np.random.default_rng(42)
+    db = rng.standard_normal((100, 8)).astype(np.float32)
+
+    # 1. When centroids are trained via k-means
+    idx_trained = IVFFlatIndex(database=db, nlist=4, seed=42)
+    assert idx_trained.kmeans_n_iter is not None
+    assert idx_trained.kmeans_n_iter >= 1
+    assert isinstance(idx_trained.kmeans_converged, bool)
+    assert idx_trained.kmeans_inertia is not None
+    assert idx_trained.kmeans_inertia >= 0.0
+
+    # 2. When centroids are provided explicitly
+    centroids = db[:4].copy()
+    idx_explicit = IVFFlatIndex(database=db, nlist=4, centroids=centroids)
+    assert idx_explicit.kmeans_n_iter is None
+    assert idx_explicit.kmeans_converged is None
+    assert idx_explicit.kmeans_inertia is None

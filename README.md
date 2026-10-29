@@ -18,6 +18,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 5 (IVF-Flat):** Complete. Inverted File Flat index with coarse k-means quantization, durable int64 IDs, immutable posting lists, multi-probe candidate gathering, and bit-for-bit all-probe equivalence with exact search.
 - **Phase 6 (Benchmark Harness v0.1):** Complete. Ground-truth baseline evaluation, multi-probe IVF sweeps across nlist/nprobe, Recall@k with sentinel exclusion, distance computation accounting, machine-readable JSON/CSV reporting, automated plot generation, and CLI runner.
 - **Phase 6.5 (Benchmark Hardening & Real Data):** Complete. Disentangled ID `-1` from array padding via explicit `SearchResult.mask`, separated individual per-query latency percentiles from full-batch throughput (QPS), added persistent index storage memory metrics (`index_memory_bytes`, `index_memory_mib`, `bytes_per_vector`), instrumented actual search work directly in search paths, added binary `.fvecs` SIFT1M subset loader (`read_fvecs`, `load_sift_dataset`) with streaming SHA-256 verification, and expanded CI with an offline smoke-benchmark gate.
+- **Phase 6.6 (Performance Baseline & Benchmark Credibility):** Complete. Added fast BLAS-accelerated exact search (`ExactBlasIndex`, `exact_search_blas`, `pairwise_squared_l2_blas`) leveraging $\|x-y\|^2 = \|x\|^2 + \|y\|^2 - 2(x \cdot y)$ while preserving the coordinate-difference reference kernel as the correctness oracle; accelerated K-means centroid assignment; bounded query batch memory via `max_query_chunk=1024`; added distance-aware Recall@k (`compute_distance_aware_recall_at_k`) to resolve boundary equidistant ties; exposed K-means convergence diagnostics (`kmeans_n_iter`, `kmeans_converged`, `kmeans_inertia`); tracked peak process RSS memory; and updated benchmark manifests, CSVs, and dual-baseline plots.
 
 ## Project Conventions
 
@@ -103,10 +104,13 @@ To benchmark against the canonical SIFT dataset:
 ### Metric Definitions
 
 - **Recall@k:** Fraction of true top-$k$ nearest neighbors retrieved relative to exact search ground truth. Evaluated strictly using `.mask` so that padding slots are excluded while real IDs (including `-1`) count toward hits.
-- **Per-Query Latency (ms):** Individual query execution times sampled across independent calls, reporting p50, p95, p99, mean, min, and max percentiles.
+- **Distance-Aware Recall@k:** Evaluates recall by considering retrieved candidates whose distance matches or beats the distance of the $k$-th ground-truth neighbor ($d \le d_k^{\text{GT}} + \epsilon$). This prevents penalizing approximate search when multiple database vectors share identical distances at the top-$k$ boundary.
+- **Per-Query Latency (ms):** Individual query execution times sampled across independent calls (reporting p50, p95, p99, mean, std, min, and max percentiles).
 - **Batch Throughput (QPS):** Queries per second measured over repeated full-batch searches ($Q / t_{\text{sec}}$).
 - **Distance Computations (DC):** Vector distance calculations executed inside the search path per query ($N$ for exact scan, $n_{\text{list}} + \text{mean}(N_{\text{cand}})$ for IVF-Flat).
 - **Index Storage Memory (MiB):** Exact memory of stored index arrays (centroids, vectors, and durable IDs) in binary mebibytes ($1024^2$ bytes), reported alongside `bytes_per_vector`.
+- **Peak Process RSS (MiB):** Peak resident set size of the process across execution, captured directly from OS memory counters.
+- **Exact Baselines:** Benchmarks track both `exact_reference` (coordinate-difference direct kernel, correctness oracle) and `exact_blas` (norm expansion via BLAS matrix multiplication).
 
 ## Documentation
 

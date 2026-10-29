@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Sequence
 import numpy as np
 
-from indexora.kernels import pairwise_squared_l2_ref
+from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,7 @@ def _validate_kmeans_inputs(
     max_iter: int | None = None,
     tol: float | None = None,
     empty_cluster_policy: str | None = None,
+    distance_method: str | None = None,
 ) -> tuple[int, int]:
     """Validate input matrix and hyperparameters for k-means.
 
@@ -125,6 +126,14 @@ def _validate_kmeans_inputs(
             raise ValueError(
                 f"Unknown empty_cluster_policy: {empty_cluster_policy!r}. "
                 f"Must be one of {sorted(valid_policies)}"
+            )
+
+    if distance_method is not None:
+        valid_distance_methods = {"blas", "reference"}
+        if distance_method not in valid_distance_methods:
+            raise ValueError(
+                f"Unknown distance_method: {distance_method!r}. "
+                f"Must be one of {sorted(valid_distance_methods)}"
             )
 
     return N, d
@@ -240,6 +249,7 @@ def kmeans(
     tol: float = 1e-4,
     seed: int | np.random.Generator | None = None,
     empty_cluster_policy: str = "reseed_furthest",
+    distance_method: str = "blas",
 ) -> KMeansResult:
     """Fit k-means clustering to input data using Lloyd's algorithm.
 
@@ -263,6 +273,11 @@ def kmeans(
           has the largest squared distance to its assigned centroid.
         - "keep": Retain the centroid's position from the previous iteration.
         - "error": Raise `RuntimeError` immediately when an empty cluster occurs.
+    distance_method : {"blas", "reference"}, default="blas"
+        Distance computation kernel used for vector-to-centroid assignment during
+        Lloyd iterations. "blas" uses matrix multiplication ||x||^2 + ||c||^2 - 2(x.c)
+        for fast multi-core assignment; "reference" uses `pairwise_squared_l2_ref`
+        for exact coordinate differences.
 
     Returns
     -------
@@ -290,6 +305,7 @@ def kmeans(
         max_iter=max_iter,
         tol=tol,
         empty_cluster_policy=empty_cluster_policy,
+        distance_method=distance_method,
     )
 
     if seed is not None and not isinstance(seed, (int, np.integer, np.random.Generator)):
@@ -309,7 +325,10 @@ def kmeans(
         n_iter = iteration
 
         # Pairwise squared distances to current centroids: shape (N, k)
-        dists = pairwise_squared_l2_ref(X, centroids)
+        if distance_method == "blas":
+            dists = pairwise_squared_l2_blas(X, centroids)
+        else:
+            dists = pairwise_squared_l2_ref(X, centroids)
 
         # Assignment step: argmin deterministically breaks ties by smallest index
         labels = np.argmin(dists, axis=1).astype(np.int64)

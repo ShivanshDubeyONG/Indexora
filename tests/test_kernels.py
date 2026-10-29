@@ -8,7 +8,7 @@ against the contracts and test matrix specified in `docs/phase1_test_spec.md` an
 import numpy as np
 import pytest
 
-from indexora.kernels import pairwise_squared_l2_ref
+from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
 
 
 def test_t1_1_identical_vectors():
@@ -366,3 +366,120 @@ def test_chunked_kernel_memory_bound_structural():
     sample_diff = queries[0].astype(np.float64) - database[0].astype(np.float64)
     expected_dist_0_0 = np.float32(np.sum(sample_diff * sample_diff))
     np.testing.assert_allclose(bounded_res[0, 0], expected_dist_0_0)
+
+
+# ============================================================================
+# Phase 6.6: Fast BLAS-Accelerated Squared-L2 Distance Kernel Tests
+# ============================================================================
+
+
+def test_blas_kernel_self_identity():
+    """Verify BLAS kernel self-distance is exactly 0.0."""
+    X = np.array([[1.5, -2.0, 3.0], [0.0, 10.0, -5.0]], dtype=np.float32)
+
+    # 1D single query
+    dist_single = pairwise_squared_l2_blas(X[0], X)
+    assert dist_single.shape == (2,)
+    assert dist_single.dtype == np.float32
+    assert dist_single[0] == 0.0
+
+    # 2D batched queries
+    dist_batch = pairwise_squared_l2_blas(X, X)
+    assert dist_batch.shape == (2, 2)
+    assert dist_batch[0, 0] == 0.0
+    assert dist_batch[1, 1] == 0.0
+
+
+def test_blas_kernel_numerical_parity_against_reference():
+    """Verify BLAS kernel matches reference coordinate-difference kernel within float32 tolerance."""
+    rng = np.random.default_rng(42)
+    for Q, N, d in [(1, 50, 8), (10, 100, 32), (25, 200, 128)]:
+        queries = rng.standard_normal((Q, d)).astype(np.float32)
+        database = rng.standard_normal((N, d)).astype(np.float32)
+
+        ref_dist = pairwise_squared_l2_ref(queries, database)
+        blas_dist = pairwise_squared_l2_blas(queries, database)
+
+        assert blas_dist.shape == (Q, N)
+        assert blas_dist.dtype == np.float32
+        np.testing.assert_allclose(blas_dist, ref_dist, rtol=1e-4, atol=1e-4)
+
+
+def test_blas_kernel_single_vs_batched():
+    """Verify 1D query returns 1D array matching row 0 of 2D batched query."""
+    rng = np.random.default_rng(99)
+    q = rng.standard_normal(16).astype(np.float32)
+    db = rng.standard_normal((30, 16)).astype(np.float32)
+
+    dist_1d = pairwise_squared_l2_blas(q, db)
+    dist_2d = pairwise_squared_l2_blas(q.reshape(1, -1), db)
+
+    assert dist_1d.shape == (30,)
+    assert dist_2d.shape == (1, 30)
+    np.testing.assert_array_equal(dist_1d, dist_2d[0])
+
+
+def test_blas_kernel_clipping_of_negative_roundoff():
+    """Verify that norm-expansion floating point roundoff never returns negative distances."""
+    rng = np.random.default_rng(123)
+    # Generate vectors with large norms close to each other
+    base = rng.standard_normal((100, 64)).astype(np.float32) * 1000.0
+    queries = base.copy()
+
+    dist = pairwise_squared_l2_blas(queries, base)
+    assert np.all(dist >= 0.0)
+    # All values are non-negative, and self-distances are within float32 roundoff of 0
+    sq_norms = np.sum(base * base, axis=1)
+    relative_diag = np.diag(dist) / sq_norms
+    np.testing.assert_allclose(relative_diag, 0.0, atol=1e-6)
+
+
+def test_blas_kernel_validation_errors():
+    """Verify input validation for pairwise_squared_l2_blas."""
+    valid_q = np.ones((5, 4), dtype=np.float32)
+    valid_db = np.ones((10, 4), dtype=np.float32)
+
+    # Non-float32 dtype
+    with pytest.raises(TypeError, match="float32"):
+        pairwise_squared_l2_blas(valid_q.astype(np.float64), valid_db)
+    with pytest.raises(TypeError, match="float32"):
+        pairwise_squared_l2_blas(valid_q, valid_db.astype(np.float64))
+
+    # Dimension mismatch
+    with pytest.raises(ValueError, match="Dimension mismatch"):
+        pairwise_squared_l2_blas(valid_q, np.ones((10, 5), dtype=np.float32))
+
+    # Non-finite values
+    inf_q = valid_q.copy()
+    inf_q[0, 0] = np.inf
+    with pytest.raises(ValueError, match="finite"):
+        pairwise_squared_l2_blas(inf_q, valid_db)
+
+    nan_db = valid_db.copy()
+    nan_db[1, 1] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        pairwise_squared_l2_blas(valid_q, nan_db)
+
+
+def test_blas_kernel_empty_inputs():
+    """Verify empty query or database behavior in BLAS kernel."""
+    empty_q = np.empty((0, 8), dtype=np.float32)
+    db = np.ones((10, 8), dtype=np.float32)
+    assert pairwise_squared_l2_blas(empty_q, db).shape == (0, 10)
+
+    empty_db = np.empty((0, 8), dtype=np.float32)
+    q = np.ones((5, 8), dtype=np.float32)
+    assert pairwise_squared_l2_blas(q, empty_db).shape == (5, 0)
+    assert pairwise_squared_l2_blas(q[0], empty_db).shape == (0,)
+
+
+def test_blas_kernel_buffer_tiling():
+    """Verify small buffer sizes force block tiling and produce correct results."""
+    rng = np.random.default_rng(77)
+    queries = rng.standard_normal((25, 16)).astype(np.float32)
+    database = rng.standard_normal((100, 16)).astype(np.float32)
+
+    oracle = pairwise_squared_l2_ref(queries, database)
+    # Force very small buffer to trigger tiling loops
+    tiled_res = pairwise_squared_l2_blas(queries, database, max_buffer_bytes=256)
+    np.testing.assert_allclose(tiled_res, oracle, rtol=1e-4, atol=1e-4)
