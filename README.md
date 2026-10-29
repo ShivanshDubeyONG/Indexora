@@ -1,6 +1,92 @@
 # Indexora
 
-A learning-first vector search engine built from scratch in Python and NumPy.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Tests Passing](https://img.shields.io/badge/tests-325%20passed-success.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**A learning-first vector search engine built from scratch in Python and NumPy.**
+
+Explore the mathematical foundations, systems trade-offs, and algorithms behind modern vector search engines—from high-performance BLAS distance kernels to Inverted Files (IVF), Product Quantization (PQ), and Hierarchical Navigable Small Worlds (HNSW).
+
+---
+
+## 30-Second Elevator Pitch
+
+Modern vector databases (e.g., Pinecone, Milvus, Qdrant) power generative AI, retrieval-augmented generation (RAG), and similarity search. Yet their internal mechanics—Voronoi partitioning, Asymmetric Distance Computation, proximity graph routing, and SIMD hardware acceleration—remain opaque black boxes to most engineers.
+
+**Indexora demystifies vector search from first principles.** Built with pure Python and NumPy (zero C++ dependencies for core algorithms), Indexora demonstrates how vector indexes work under the hood:
+1. **Math to Code:** Implements squared Euclidean distance kernels, $K$-means++, inverted posting lists, subspace residual quantization, and multi-layer HNSW graphs.
+2. **Systems-Level Rigor:** Contrasts coordinate-difference reference loops with BLAS Level-3 GEMM matrix multiplication ($\|x-y\|^2 = \|x\|^2 + \|y\|^2 - 2x \cdot y$), delivering $3.15\times$ speedups.
+3. **Full Lifecycle:** Supports incremental mutations (`add`), tombstones (`delete`), single-stage ID/category filtering (`filter_ids`), and pickle-free atomic persistence (`save_index`/`load_index`) with streaming SHA-256 manifests.
+4. **End-to-End Applications:** Features an interactive web lab (`streamlit run src/indexora/ui.py`) and live semantic text search using neural sentence embeddings.
+
+---
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    subgraph UI ["Interactive Exploration & Search"]
+        Streamlit["Interactive Index Lab\n(Streamlit UI: src/indexora/ui.py)"]
+        Semantic["Semantic Text Search\n(all-MiniLM-L6-v2 + Exact / IVF / HNSW)"]
+        Bench["Benchmark Harness\n(CLI: SIFT-100k & Synthetic)"]
+    end
+
+    subgraph CoreEngine ["Indexora Core Vector Engine"]
+        Exact["Exact Search\n(ExactFlatIndex / ExactBlasIndex)"]
+        IVF["Inverted File Index\n(IVFFlatIndex: nlist / nprobe)"]
+        PQ["Product Quantization\n(IVFPQIndex: M subspaces / ADC LUTs)"]
+        HNSW["Navigable Small World\n(HNSWIndex: Algorithm 4 Diversity)"]
+    end
+
+    subgraph Primitives ["Mathematical Kernels & Lifecycle"]
+        BLAS["BLAS Distance Kernel\n(||x-y||² = ||x||² + ||y||² - 2x·y)"]
+        Lifecycle["Mutations & Filtering\n(add / delete tombstones / filter_ids)"]
+        Storage["Atomic Pickle-Free Persistence\n(manifest.json + .npy + SHA-256)"]
+    end
+
+    UI --> CoreEngine
+    CoreEngine --> Primitives
+```
+
+---
+
+## Algorithm Selection Guide
+
+| Algorithm | Index Class | Build Cost | Query Latency | Memory Footprint | Recall Guarantee | When to Use |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Exact (Ref)** | `ExactFlatIndex` | None ($O(1)$) | High ($O(N \cdot d)$) | Baseline ($4 \cdot N \cdot d$ B) | 100% | Correctness oracle & numerical validation. |
+| **Exact (BLAS)** | `ExactBlasIndex` | Fast ($O(1)$) | Low for $N \le 10^4$ | Baseline ($4 \cdot N \cdot d$ B) | 100% | Datasets up to 10k vectors or when 100% recall is strictly required. |
+| **IVF-Flat** | `IVFFlatIndex` | Moderate ($K$-means) | Sub-linear ($O(\frac{N}{\text{nlist}} \cdot \text{nprobe})$) | Baseline ($+ \text{centroids}$) | High (tunable via `nprobe`) | Low-memory approximate search with fast build times on clustered data. |
+| **IVF-PQ** | `IVFPQIndex` | High (residual $K$-means) | Sub-linear ($O(\text{cand} \cdot M)$ table lookups) | **Very Low (15x–64x compression)** | Moderate to High | Memory-constrained environments; massive datasets that must fit in RAM. |
+| **HNSW** | `HNSWIndex` | High ($O(N \log N)$ graph construction) | **Ultra-low ($O(\log N)$)** | Moderate ($+ M$ edges/node) | **Very High (98%–100%)** | Low-latency applications (RAG, live search) prioritizing top-k retrieval speed. |
+
+---
+
+## 10-Second Quickstart
+
+```python
+import numpy as np
+from indexora import HNSWIndex, normalize_l2
+
+# 1. Prepare unit-normalized vectors (d=128)
+vectors = normalize_l2(np.random.randn(1000, 128).astype(np.float32))
+ids = np.arange(1000, dtype=np.int64)
+
+# 2. Build an HNSW proximity graph
+index = HNSWIndex(database=vectors, ids=ids, M=8, ef_construction=32, ef_search=16)
+
+# 3. Query the nearest neighbors with cosine ranking
+query = normalize_l2(np.random.randn(128).astype(np.float32))
+result = index.search(query, k=5)
+
+# 4. Results contain IDs, squared L2 distances, and valid match mask
+print("Retrieved IDs:", result.ids)
+print("Squared L2 Distances:", result.distances)
+print("Cosine Similarities:", 1.0 - 0.5 * result.distances)
+```
+
+---
 
 ## Purpose
 
@@ -404,8 +490,10 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 4. **Experience End-to-End Semantic Search (30s):**
    Switch to the **"📚 Semantic Text Search"** tab in the Lab (or run the Python snippet above). Click an example technical query (e.g. *"LSM-tree write performance and disk flushing"*), switch between Exact BLAS, IVF-Flat, and HNSW, and inspect the latency breakdown and exact top-$k$ match verification.
 
-## Documentation
+## Documentation & Deep Dives
 
+- **[`docs/architecture.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/architecture.md):** Comprehensive technical architecture, mathematical foundations, data structures, and trade-off disclosures.
+- **[`docs/interview_prep.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/interview_prep.md):** 16 in-depth technical interview questions, rigorous answers, and live demonstration script.
 - `plan/project srs.md`: Project Brief & Software Requirements Specification (SRS v3.0)
 - `plan/tech design.md`: Architecture, Data Model, Kernel Contracts & Experiments (v3.0)
 - `plan/implementation.md`: 14-phase acceptance-gated roadmap and ownership policy (v3.0)

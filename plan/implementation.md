@@ -340,20 +340,25 @@ Integrated end-to-end semantic text search (`src/indexora/semantic.py` and `src/
   - Latency breakdown cards, distance computation accounting, and formatted document result cards with cosine similarity and exact match badges.
 - **Validation:** 14 dedicated offline unit tests in `tests/test_semantic.py`, bringing the total test suite to 325 passing tests.
 
-### Phase 13 --- Portfolio and interview prep (SHARED)
+### Phase 13 --- Release Readiness & Interview Preparation [COMPLETED]
 
-Audit install/tests/benchmarks/demo from a clean checkout. Add
-architecture and experiment diagrams, methodology, limitations, and
-interview notes. Draft resume bullets only from measured evidence.
+Audited the repository, validated the complete user experience, created comprehensive technical documentation, and finalized presentation readiness.
 
-**Prompt:** "Audit the repository against the brief and phase gates.
-Find missing tests, unsupported claims, and reproducibility gaps. Do not
-invent results. Draft claims only from measurements present in the
-repository."
-
-**Gate:** new users can install, test, run a benchmark, and launch the
-demo; all advertised features are implemented/tested or clearly marked
-experimental/planned.
+- **Technical Architecture (`docs/architecture.md`):**
+  - Modular layered architecture with Mermaid diagrams.
+  - Mathematical foundations of squared L2 distance, Level-3 BLAS GEMM norm expansion, and unit vector cosine equivalence.
+  - In-depth descriptions of all 5 index architectures: Exact Reference, Exact BLAS, IVF-Flat, IVF-PQ, and custom HNSW.
+  - Lifecycle mechanisms: single-stage filtering, incremental additions, HNSW routing tombstones, and pickle-free atomic persistence with streaming SHA-256 manifests.
+  - Transparent disclosures regarding Python interpreter overhead on small datasets ($N \le 10^3$) vs vectorized BLAS.
+- **Interview Preparation Guide (`docs/interview_prep.md`):**
+  - 16 rigorous technical interview questions and code-backed answers spanning computational geometry, systems trade-offs, and vector database internals.
+  - 2-minute live walkthrough script for technical demos.
+- **Presentation-Ready README (`README.md`):**
+  - 30-second elevator pitch and core problem statement.
+  - Mermaid architecture diagram and index selection guide table ("When to use which index").
+  - 10-second quickstart installation and Python usage snippets.
+  - Documented empirical SIFT-100k benchmarks ($N=100k, d=128, Q=1k, k=10$) with full environment context.
+- **Validation:** 325 passing tests in the automated suite (`pytest -q`), clean benchmark smoke runs, live neural semantic retrieval verified on CPU with `all-MiniLM-L6-v2`, and tag `v0.1` preserved at commit `6d4d91f`.
 
 ## 4. Release gates
 
