@@ -52,6 +52,7 @@ sift/
 *.npz
 
 # IDE and OS files
+demo_indexes/
 .idea/
 .vscode/
 *.swp

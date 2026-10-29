@@ -28,6 +28,10 @@ adapters = [
     "faiss-cpu>=1.7.4",
     "hnswlib>=0.7.0",
 ]
+ui = [
+    "streamlit>=1.30.0",
+    "matplotlib>=3.5.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

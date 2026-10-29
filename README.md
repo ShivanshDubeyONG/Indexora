@@ -24,6 +24,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 9 (Product Quantization & IVF-PQ):** Complete. Added `ProductQuantizer` and `IVFPQIndex` with subspace decomposition ($d = M \times d_{\text{sub}}$), compact quantization codes (`uint8`/`uint16`), coarse-centroid residual encoding, and Asymmetric Distance Computation (ADC) lookup table candidate scoring. Demonstrated **15.2x memory compression** (reducing index footprint from 5.01 MB to 0.33 MB for $N=10,000, d=128$) while maintaining full compatibility with Indexora's ID and search result contracts.
 - **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** while evaluating only ~15% of database distances.
 - **Phase 11 (Mutations, Filtering & Persistence):** Complete. Implemented incremental additions (`add`), deletions (`delete`), filtered candidate search (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core index implementations. Features pickle-free `.npy` storage, SHA-256 manifest integrity verification, CSR graph serialization for HNSW without re-indexing, and codebook preservation for IVF-PQ without retraining.
+- **Phase 12A (Interactive Index Lab):** Complete. Built a local-first interactive web laboratory in Streamlit backed directly by Indexora's actual vector engines. Features interactive query search with 2D PCA spatial maps, comparative accuracy-vs-latency benchmarks across all 5 core indexes, real-time incremental additions and tombstone deletions, and atomic disk persistence verification with SHA-256 checksums.
 
 ## Project Conventions
 
@@ -55,10 +56,10 @@ source venv/bin/activate
 
 ### Installation
 
-Install Indexora in editable mode with development dependencies:
+Install Indexora in editable mode with development, benchmark, and UI dependencies:
 
 ```bash
-pip install -e ".[dev,benchmark]"
+pip install -e ".[dev,benchmark,ui]"
 ```
 
 ### Running Tests
@@ -289,6 +290,49 @@ restored_index = load_index("models/my_hnsw_index", verify_checksums=True)
 - **Zero Recomputation:**
   - HNSW graphs are saved as Compact Sparse Row (CSR) representations and restored with bit-identical layer connectivity without graph re-indexing.
   - IVF-PQ indexes restore coarse centroids, trained subspace codebooks, and discrete codes without retraining coarse k-means or codebooks.
+
+## Interactive Index Lab (Phase 12A)
+
+The **Interactive Index Lab** is a local-first web playground built with Streamlit that connects directly to Indexora's actual Python and NumPy implementations. It enables visual, interactive experimentation with nearest-neighbor search mechanics, spatial indexing, filtered queries, dynamic mutations, and atomic persistence.
+
+### Launching the Lab
+
+Install optional UI dependencies and run the lab:
+
+```bash
+# 1. Install UI dependencies
+pip install -e ".[ui]"
+
+# 2. Launch the Streamlit application
+streamlit run src/indexora/ui.py
+
+# Alternatively, via python module runner:
+python -m indexora.ui
+```
+
+### Lab Features & Capabilities
+
+1. **Overview & Mechanics:**
+   - Interactive breakdown of Indexora's 4 core indexing paradigms: Exact Flat/BLAS ($O(N \cdot d)$ brute force), IVF-Flat (coarse Voronoi clustering), IVF-PQ (subspace compression & ADC lookup tables), and HNSW (hierarchical navigable small-world graphs).
+   - Real-time dataset configuration: control vector count ($N$), dimensions ($d$), cluster counts, dispersion ($\sigma$), and random seed.
+2. **Search Playground:**
+   - Single-query exploration: select queries from the dataset or generate random probe vectors.
+   - Dynamic parameter controls tailored to the active index (`nprobe` for IVF, `ef_search` for HNSW, none for exact).
+   - Optional `filter_ids` eligibility filter: pass sets of allowed IDs or lambda predicates.
+   - Detailed result table showing Rank, External ID, Squared L2 Distance, and Exact Ground-Truth Match indicator (`✅ Exact Match` vs `⚡ Approximation`).
+   - **2D PCA Projection Visualizer:** Deterministic SVD PCA projects the $d$-dimensional dataset into a 2D plane, mapping cluster clusters, query coordinates (star marker), and highlighting retrieved neighbors.
+3. **Accuracy & Performance Lab:**
+   - Comparative benchmark running all 5 index implementations on identical query vectors under the same top-$k$.
+   - Measures index build time, median query latency, p95 latency, throughput (QPS), Recall@k against exact ground truth, distance computations per query, and memory footprint.
+   - Interactive charts: Recall vs. Median Latency trade-off and Candidate Distance Computations per query.
+4. **Mutations & Persistence Playground:**
+   - Real-time incremental vector additions with custom/auto IDs.
+   - Dynamic vector deletions with tombstone routing preservation in HNSW.
+   - Atomic directory save & load: writes pickle-free `.npy` arrays and `manifest.json` with SHA-256 verification, and executes a verification query on the loaded instance.
+
+> **Data & Performance Disclosure:**
+> - The Lab uses **synthetic numerical vectors in $\mathbb{R}^d$** generated from clustered Gaussian distributions to illustrate spatial indexing mechanics. It is **not** semantic text search or embedding retrieval.
+> - On small synthetic datasets ($N \approx 120$), Exact BLAS can report lower query latency than HNSW or IVF due to Python interpreter overhead vs C-accelerated BLAS matrix operations. On larger datasets ($N \ge 10^5$), HNSW's logarithmic $O(\log N)$ routing and IVF's cluster pruning significantly outperform exhaustive scans.
 
 ## Documentation
 

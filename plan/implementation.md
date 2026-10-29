@@ -300,7 +300,24 @@ Implemented reliable index mutations (`add`, `delete`), metadata/ID filtering (`
   - Exact state restoration: Reconstructs HNSW multi-layer CSR graphs without graph rebuilds; reconstructs IVF-PQ codebooks and posting lists without retraining coarse k-means or subspace quantizers.
 - **Validation:** 88 dedicated unit tests across mutations (`test_mutations.py`), filtering (`test_filtering.py`), and persistence (`test_persistence.py`), achieving 291/291 passing tests in the full test suite.
 
-### Phase 12 --- Semantic-search demo (AGENT-ASSISTED)
+### Phase 12A --- Interactive Index Lab (UI Playground) [COMPLETED]
+
+Implemented a local-first web playground (`src/indexora/ui.py` and `src/indexora/lab.py`) using Streamlit that provides an interactive, visual interface directly backed by Indexora's actual Python/NumPy implementations.
+
+- **Non-UI Data & Lab Layer (`src/indexora/lab.py`):**
+  - Deterministic clustered dataset generation with configurable dispersion, cluster counts, and stable `int64` IDs.
+  - Deterministic 2D PCA projection computed via pure NumPy SVD without external dependencies.
+  - Exact reference ground truth computation and Recall@k evaluation.
+  - Multi-index benchmark execution measuring build time, latency percentiles (p50, p95), QPS, distance evaluations, and memory footprint.
+  - `LabSession` state manager tracking incremental additions, tombstone deletions, and atomic directory persistence.
+- **Interactive UI Playground (`src/indexora/ui.py`):**
+  - **Overview & Mechanics:** Architecture comparison cards for Exact Flat/BLAS, IVF-Flat, IVF-PQ, and HNSW.
+  - **Search Playground:** Single-query exploration, index selection with index-specific parameter tuning (`nprobe`, `ef_search`), optional `filter_ids`, and interactive 2D PCA map highlighting true nearest neighbors vs. approximations.
+  - **Accuracy & Performance Lab:** Live multi-index benchmark sweep with Recall vs. Latency scatter plots, distance computation bar charts, and memory accounting.
+  - **Mutations & Persistence:** Real-time demonstration of vector additions, tombstone deletions, and atomic save/load round-trips with SHA-256 manifest verification.
+- **Validation:** 11 dedicated unit tests in `tests/test_lab.py`, bringing the total test suite to 302/302 passing tests.
+
+### Phase 12B --- Semantic-search demo (AGENT-ASSISTED)
 
 Use a modest corpus and cached sentence embeddings. Provide a CLI or
 lightweight web page that calls Indexora's public API, displays
