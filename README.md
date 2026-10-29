@@ -129,7 +129,7 @@ Evaluation on the first 100,000 base vectors and 1,000 queries ($d=128$, $k=10$,
 ### Metric Definitions
 
 - **Recall@k:** Fraction of true top-$k$ nearest neighbors retrieved relative to exact search ground truth. Evaluated strictly using `.mask` so that padding slots are excluded while real IDs (including `-1`) count toward hits.
-- **Distance-Aware Recall@k:** Evaluates recall by considering retrieved candidates whose distance matches or beats the distance of the $k$-th ground-truth neighbor ($d \le d_k^{\text{GT}} + \epsilon$). This prevents penalizing approximate search when multiple database vectors share identical distances at the top-$k$ boundary.
+- **Distance-Aware Recall@k:** Evaluates recall by considering retrieved candidates whose distance matches or beats the distance of the $k$-th ground-truth neighbor ($d \le d_k^{\text{GT}} + \epsilon$). This prevents penalizing approximate search when multiple database vectors share identical distances at the top-$k$ boundary. Note: applicable to exact candidate distance scoring (e.g. Exact Flat, IVF-Flat); not intended for un-reranked quantized ADC distances where quantization error distorts threshold comparisons.
 - **Per-Query Latency (ms):** Individual query execution times sampled across independent calls (reporting p50, p95, p99, mean, std, min, and max percentiles).
 - **Batch Throughput (QPS):** Queries per second measured over repeated full-batch searches ($Q / t_{\text{sec}}$).
 - **Distance Computations (DC):** Vector distance calculations executed inside the search path per query ($N$ for exact scan, $n_{\text{list}} + \text{mean}(N_{\text{cand}})$ for IVF-Flat).

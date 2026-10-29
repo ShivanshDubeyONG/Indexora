@@ -211,6 +211,14 @@ def compute_distance_aware_recall_at_k(
     -------
     float
         Distance-aware Recall@k score between 0.0 and 1.0.
+
+    Notes
+    -----
+    This metric assumes `retrieved.distances` contains exact squared Euclidean distances
+    to database vectors (e.g. Exact Flat or IVF-Flat). When evaluating quantized indexes
+    such as IVF-PQ without exact reranking, approximate ADC distances must not be compared
+    directly against ground-truth exact distance thresholds, as quantization error can
+    systematically distort threshold comparisons.
     """
     if not isinstance(retrieved, SearchResult) or not isinstance(ground_truth, SearchResult):
         raise TypeError("Both retrieved and ground_truth must be SearchResult instances.")
