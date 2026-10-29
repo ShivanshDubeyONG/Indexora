@@ -37,7 +37,8 @@ htmlcov/
 # Generated benchmark results and artifacts
 benchmarks/results/
 benchmark_output/
-results/
+results/*
+!results/sift100k_p66/
 *.prof
 
 # Datasets and local array caches

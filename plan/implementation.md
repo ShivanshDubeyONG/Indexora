@@ -198,7 +198,7 @@ Audit and stabilize benchmark methodology before Phase 7 reference adapters:
 5. Surface K-means convergence statistics (`kmeans_n_iter`, `kmeans_converged`, `kmeans_inertia`).
 6. Benchmarking dual exact baselines (`exact_reference` and `exact_blas`), reporting query latency standard deviation (`per_query_std_ms`), seeded latency query sampling, and tracking OS peak process RSS.
 
-*Status: Complete.* 163 tests passing, verified across smoke and synthetic benchmarks.
+*Status: Complete & Verified.* 163 tests passing. Full SIFT-100k evaluation completed: BLAS Exact achieves 19.5 QPS (vs 6.2 QPS for reference); K-means build time reduced from ~18 min to 22.8s for nlist=100; IVF-Flat sweeps demonstrate 78.7x speedup over BLAS Exact at nlist=100, nprobe=1 (Recall@10=0.5287) and 6.0x speedup at nprobe=10 (Recall@10=0.9791). Artifacts preserved in `results/sift100k_p66/`.
 
 ### Phase 7 --- Reference adapters (AGENT-ASSISTED)
 

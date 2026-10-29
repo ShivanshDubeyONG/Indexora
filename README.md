@@ -101,6 +101,28 @@ To benchmark against the canonical SIFT dataset:
    python -m indexora.benchmark --dataset sift_fvecs --base-path sift/sift_base.fvecs --query-path sift/sift_query.fvecs --n-base 100000 --n-queries 1000
    ```
 
+### Verified SIFT-100k Benchmark Findings (Phase 6.6)
+
+Evaluation on the first 100,000 base vectors and 1,000 queries ($d=128$, $k=10$, squared L2):
+
+| Index | $n_{\text{list}}$ | $n_{\text{probe}}$ | Recall@10 | DistRec | p50 (ms) | p95 (ms) | Batch QPS | Dist / Q | Build Time | K-means $n_{\text{iter}}$ / Conv |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Exact (Ref)** | — | — | **1.0000** | 1.0000 | 150.69 | 198.22 | 6.2 | 100,000 | 0.01s | — |
+| **Exact (BLAS)**| — | — | **1.0000** | 1.0000 | **99.74** | 146.96 | **19.5** | 100,000 | 0.03s | — |
+| **IVF-Flat** | 10 | 1 | 0.7882 | 0.7882 | 15.41 | 23.45 | 64.0 | 10,542 | 16.38s | 83 / True |
+| **IVF-Flat** | 10 | 10 | **1.0000** | 1.0000 | 175.20 | 214.04 | 5.9 | 100,010 | 16.38s | 83 / True |
+| **IVF-Flat** | 50 | 1 | 0.5976 | 0.5976 | 3.83 | 5.45 | 263.0 | 2,276 | 36.71s | 100 / False |
+| **IVF-Flat** | 50 | 20 | **1.0000** | 1.0000 | 67.90 | 92.15 | 16.4 | 40,973 | 36.71s | 100 / False |
+| **IVF-Flat** | 100 | 1 | 0.5287 | 0.5287 | **0.72** | 1.22 | **1,534.6** | 1,213 | 22.77s | 100 / False |
+| **IVF-Flat** | 100 | 10 | 0.9791 | 0.9791 | 8.32 | 11.14 | 116.8 | 10,928 | 22.77s | 100 / False |
+| **IVF-Flat** | 100 | 20 | **0.9980** | 0.9980 | 17.75 | 21.18 | 55.9 | 21,481 | 22.77s | 100 / False |
+
+**Key Takeaways & Limitations:**
+- **Exact Scan Baseline:** BLAS Exact achieves $3.15\times$ higher throughput (19.5 vs. 6.2 QPS) and $1.51\times$ lower p50 latency than the reference oracle.
+- **IVF-Flat Speedup:** Compared to the realistic BLAS exact baseline, IVF-Flat (`nlist=100, nprobe=1`) provides a $78.7\times$ throughput speedup (1,534.6 vs. 19.5 QPS) at Recall@10 = 0.5287. Probing $n_{\text{probe}}=10$ lists achieves Recall@10 = 0.9791 with a $6.0\times$ throughput speedup (116.8 vs. 19.5 QPS).
+- **Build-Time Acceleration:** Vectorized BLAS cluster assignments reduced K-means index build time for $n_{\text{list}}=100$ from $\approx 18$ minutes to 22.8 seconds ($\approx 47\times$ faster).
+- **Limitations:** Measurements reflect single-process NumPy execution on CPU with $N=100,000$ and $Q=1,000$ vectors; results do not extrapolate to different vector distributions, hardware, or multi-threaded C++/GPU implementations.
+
 ### Metric Definitions
 
 - **Recall@k:** Fraction of true top-$k$ nearest neighbors retrieved relative to exact search ground truth. Evaluated strictly using `.mask` so that padding slots are excluded while real IDs (including `-1`) count toward hits.
