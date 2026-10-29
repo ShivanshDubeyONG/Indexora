@@ -31,6 +31,16 @@ from indexora.lab import (
     evaluate_index_search,
     generate_lab_dataset,
 )
+from indexora.semantic import (
+    DEFAULT_EMBEDDING_MODEL,
+    Document,
+    SemanticSearchEngine,
+    SemanticSearchResult,
+    build_semantic_engine,
+    is_sentence_transformers_available,
+    load_demo_corpus,
+    mock_embed_texts,
+)
 
 
 def _apply_custom_styling() -> None:
@@ -223,8 +233,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_overview, tab_playground, tab_benchmark, tab_mutations = st.tabs(
-        ["📘 Overview & Concepts", "🔍 Search Playground", "📊 Accuracy & Performance Lab", "⚙️ Mutations & Persistence"]
+    tab_overview, tab_playground, tab_benchmark, tab_mutations, tab_semantic = st.tabs(
+        [
+            "📘 Overview & Concepts",
+            "🔍 Search Playground",
+            "📊 Accuracy & Performance Lab",
+            "⚙️ Mutations & Persistence",
+            "📚 Semantic Text Search",
+        ]
     )
 
     ds: LabDataset = st.session_state.dataset
@@ -702,6 +718,172 @@ def main() -> None:
                     st.info(f"Test query on restored index returned top-3 IDs: `{v_res.ids.tolist()}`.")
                 except Exception as exc:
                     st.error(f"Load failed: {exc}")
+
+    # =========================================================================
+    # Tab 5: Semantic Text Search (Phase 12B)
+    # =========================================================================
+    with tab_semantic:
+        st.subheader("📚 End-to-End Semantic Text Search")
+        st.markdown(
+            "Query a curated corpus of 25 technical engineering documents using dense sentence embeddings "
+            "and Indexora's native vector retrieval engines (**Exact BLAS**, **IVF-Flat**, and **HNSW**)."
+        )
+
+        has_st = is_sentence_transformers_available()
+        use_mock = False
+
+        if not has_st:
+            st.warning(
+                "⚠️ **Optional Semantic Dependencies Not Found**\n\n"
+                "Install `sentence-transformers` and `torch` to enable pretrained neural embeddings:\n\n"
+                "```bash\n"
+                "pip install -e \".[semantic]\"\n"
+                "```\n\n"
+                "You can still explore the retrieval pipeline using deterministic offline mock embeddings."
+            )
+            use_mock = st.checkbox("Enable offline mock embeddings", value=True)
+            if not use_mock:
+                st.stop()
+        else:
+            st.success("✅ `sentence-transformers` active. Using pretrained model `all-MiniLM-L6-v2` (384 dimensions, L2-normalized).")
+
+        corpus_docs = load_demo_corpus()
+
+        # Engine caching in session state
+        embed_cache_key = "semantic_doc_embeddings_mock" if use_mock else "semantic_doc_embeddings_real"
+        if embed_cache_key not in st.session_state:
+            with st.spinner("Generating document corpus embeddings..."):
+                texts = [d.text for d in corpus_docs]
+                if use_mock:
+                    st.session_state[embed_cache_key] = mock_embed_texts(texts, dim=64)
+                else:
+                    from indexora.semantic import encode_texts
+                    st.session_state[embed_cache_key] = encode_texts(texts, normalize=True)
+
+        cached_embeddings = st.session_state[embed_cache_key]
+
+        # UI Controls
+        c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 1, 1])
+        with c_ctrl1:
+            sem_index_choice = st.selectbox(
+                "Retrieval Engine Architecture:",
+                options=["Exact BLAS", "Exact Flat (Ref)", "IVF-Flat", "HNSW"],
+                index=0,
+                key="sem_idx_choice",
+            )
+        with c_ctrl2:
+            all_categories = ["All Categories"] + sorted({d.category for d in corpus_docs})
+            selected_cat = st.selectbox("Category Filter:", options=all_categories, index=0)
+        with c_ctrl3:
+            sem_k = st.slider("Top-k Results:", min_value=1, max_value=10, value=5, step=1)
+
+        # Index Tuning Parameters
+        sem_nprobe = 2
+        sem_ef = 32
+        if sem_index_choice == "IVF-Flat":
+            sem_nprobe = st.slider("IVF Probed Centroids (`nprobe`):", min_value=1, max_value=4, value=2, step=1)
+        elif sem_index_choice == "HNSW":
+            sem_ef = st.slider("HNSW Query Exploration Depth (`ef_search`):", min_value=8, max_value=64, value=32, step=8)
+
+        # Build / retrieve engine
+        embedder_fn = (lambda t: mock_embed_texts(t, dim=64)) if use_mock else None
+        engine = SemanticSearchEngine(
+            corpus=corpus_docs,
+            embeddings=cached_embeddings,
+            index_type=sem_index_choice,
+            embedder=embedder_fn,
+            model_name=DEFAULT_EMBEDDING_MODEL,
+            ivf_nlist=4,
+            ivf_nprobe=sem_nprobe,
+            hnsw_m=8,
+            hnsw_ef_construction=32,
+            hnsw_ef_search=sem_ef,
+        )
+
+        st.markdown("---")
+        st.markdown("#### Query Input")
+
+        example_queries = [
+            "How do attention mechanisms in language models work?",
+            "LSM-tree write performance and disk flushing",
+            "Consensus algorithms and fault-tolerant leader election",
+            "Zero trust architecture and network encryption",
+            "Decoupling services with asynchronous message queues",
+        ]
+
+        preset_cols = st.columns(len(example_queries))
+        preset_clicked: str | None = None
+        for i, q_text in enumerate(example_queries):
+            short_label = q_text.split()[0] + " " + q_text.split()[1] + "..."
+            if preset_cols[i].button(f"💡 {short_label}", key=f"ex_q_{i}", help=q_text, use_container_width=True):
+                preset_clicked = q_text
+
+        default_query_text = preset_clicked or "How do attention mechanisms in language models work?"
+        user_query = st.text_input("Enter natural language search query:", value=default_query_text)
+
+        filter_category_val = None if selected_cat == "All Categories" else selected_cat
+
+        if user_query.strip():
+            result: SemanticSearchResult = engine.search(
+                query=user_query,
+                k=sem_k,
+                filter_category=filter_category_val,
+                nprobe=sem_nprobe,
+                ef_search=sem_ef,
+            )
+
+            # Metrics row
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Total Latency", f"{result.latency_ms + result.embed_time_ms:.2f} ms")
+            with m2:
+                st.metric("Text Embed Time", f"{result.embed_time_ms:.2f} ms")
+            with m3:
+                st.metric("Index Search Time", f"{result.latency_ms:.3f} ms")
+            with m4:
+                dist_str = str(result.distance_computations) if result.distance_computations is not None else "N/A"
+                st.metric("Distance Computations", dist_str)
+            with m5:
+                match_pct = (sum(result.is_exact_match) / len(result.is_exact_match) * 100) if result.is_exact_match else 0.0
+                st.metric("Exact Top-k Match", f"{match_pct:.0f}%")
+
+            st.markdown("#### Retrieved Documents")
+            if not result.retrieved_documents:
+                st.info("No documents found matching the query and category filter.")
+            else:
+                cos_sims = result.cosine_similarities
+                for rank, (doc, dist, is_match, cos_sim) in enumerate(
+                    zip(result.retrieved_documents, result.distances, result.is_exact_match, cos_sims),
+                    start=1,
+                ):
+                    match_badge = "🎯 Exact Match" if is_match else "⚡ Approximation"
+                    tags_badge = " ".join([f"`{t}`" for t in doc.metadata.get("tags", [])])
+
+                    with st.container():
+                        st.markdown(
+                            f"**#{rank}. {doc.title}** &nbsp;•&nbsp; `{doc.category}` &nbsp;•&nbsp; "
+                            f"<span style='color: {'#22c55e' if is_match else '#f59e0b'}; font-weight: 600;'>{match_badge}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            f"📐 **Squared L2 Distance:** `{dist:.4f}` &nbsp;|&nbsp; "
+                            f"**Cosine Similarity:** `{cos_sim:.4f}` &nbsp;|&nbsp; "
+                            f"**Document ID:** `{doc.doc_id}`"
+                        )
+                        st.markdown(f"> *{doc.text}*")
+                        if tags_badge:
+                            st.markdown(f"🏷️ Tags: {tags_badge}")
+                        st.markdown("---")
+
+        st.markdown("#### Mathematical Equivalence: Squared Euclidean Distance & Cosine Similarity")
+        st.info(
+            "**Why Squared L2 Distance is used for Cosine Ranking:**\n\n"
+            "Because text embeddings are unit-normalized ($||q||_2 = ||x||_2 = 1$):\n\n"
+            "$$||q - x||^2 = ||q||^2 + ||x||^2 - 2(q \\cdot x) = 2 - 2 \\cos(q, x)$$\n\n"
+            "Thus, minimizing squared Euclidean distance $||q - x||^2 \\in [0, 4]$ directly maximizes "
+            "cosine similarity $\\cos(q, x) \\in [-1, 1]$. Indexora's native squared-L2 kernels, IVF centroids, "
+            "and HNSW graph exploration seamlessly execute cosine ranking with zero algorithm alterations."
+        )
 
 
 if __name__ == "__main__":

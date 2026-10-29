@@ -32,6 +32,10 @@ ui = [
     "streamlit>=1.30.0",
     "matplotlib>=3.5.0",
 ]
+semantic = [
+    "sentence-transformers>=2.2.0",
+    "torch>=1.11.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

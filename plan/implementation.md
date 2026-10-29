@@ -317,20 +317,28 @@ Implemented a local-first web playground (`src/indexora/ui.py` and `src/indexora
   - **Mutations & Persistence:** Real-time demonstration of vector additions, tombstone deletions, and atomic save/load round-trips with SHA-256 manifest verification.
 - **Validation:** 11 dedicated unit tests in `tests/test_lab.py`, bringing the total test suite to 302/302 passing tests.
 
-### Phase 12B --- Semantic-search demo (AGENT-ASSISTED)
+### Phase 12B --- Semantic Text Search Integration [COMPLETED]
 
-Use a modest corpus and cached sentence embeddings. Provide a CLI or
-lightweight web page that calls Indexora's public API, displays
-results/snippets/metadata, and separates embedding generation from
-search latency.
+Integrated end-to-end semantic text search (`src/indexora/semantic.py` and `src/indexora/ui.py`) backed by Indexora's core retrieval engines (Exact BLAS, Exact Flat, IVF-Flat, and HNSW) and pretrained sentence embeddings.
 
-**Prompt:** "Build a simple semantic-search demo using the existing
-Indexora API. Cache embeddings, document corpus/model/preprocessing, and
-do not introduce a separate retrieval engine. Distinguish embedding
-relevance from ANN recall."
-
-**Gate:** documented clean run works and uses Indexora rather than
-bypassing it.
+- **Corpus & Data Modeling (`src/indexora/semantic.py`):**
+  - Immutable `Document` container with durable integer ID, title, text, category, and metadata tags.
+  - Curated 25-document technical corpus spanning 5 engineering domains: Machine Learning, Databases, Distributed Systems, Cybersecurity, and Software Engineering.
+- **Embedding & Distance Contract:**
+  - Pretrained `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions) as an optional extra (`pip install -e ".[semantic]"`).
+  - L2 normalization guaranteeing exact mathematical equivalence:
+    $$\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot x) = 2 - 2 \cos(q, x)$$
+    Minimizing squared Euclidean distance directly maximizes cosine similarity without altering Indexora's native distance kernels.
+  - Deterministic offline mock embedder (`mock_embed_texts`) enabling fully offline test execution and zero-dependency simulation.
+- **Search Engine Pipeline (`SemanticSearchEngine`):**
+  - Clean separation between embedding generation time ($t_{\text{embed}}$) and vector index retrieval time ($t_{\text{search}}$).
+  - Exact reference ground-truth comparison on every query to evaluate empirical approximate index recall (`is_exact_match`).
+  - Native category and ID filtering integrated into index search paths.
+- **Interactive UI Integration (Tab 5 in `src/indexora/ui.py`):**
+  - Dedicated "📚 Semantic Text Search" tab in the Streamlit lab.
+  - Quick-preset technical queries, category filter dropdown, top-$k$ controls, and index parameter sliders (`nprobe`, `ef_search`).
+  - Latency breakdown cards, distance computation accounting, and formatted document result cards with cosine similarity and exact match badges.
+- **Validation:** 14 dedicated offline unit tests in `tests/test_semantic.py`, bringing the total test suite to 325 passing tests.
 
 ### Phase 13 --- Portfolio and interview prep (SHARED)
 

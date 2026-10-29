@@ -113,11 +113,19 @@ __all__ = [
     "HnswlibIndex",
     "is_faiss_available",
     "is_hnswlib_available",
+    "Document",
+    "SemanticSearchResult",
+    "SemanticSearchEngine",
+    "build_semantic_engine",
+    "load_demo_corpus",
+    "encode_texts",
+    "mock_embed_texts",
+    "is_sentence_transformers_available",
 ]
 
 
 def __getattr__(name: str):
-    """Lazy import benchmark and adapter symbols to avoid unneeded dependency overhead."""
+    """Lazy import benchmark, adapter, and semantic symbols to avoid unneeded dependency overhead."""
     if name in {"BenchmarkConfig", "BenchmarkResult", "RunMetrics", "run_benchmark"}:
         import indexora.benchmark as _bench
 
@@ -133,5 +141,19 @@ def __getattr__(name: str):
         import indexora.adapters as _adapters
 
         return getattr(_adapters, name)
+
+    if name in {
+        "Document",
+        "SemanticSearchResult",
+        "SemanticSearchEngine",
+        "build_semantic_engine",
+        "load_demo_corpus",
+        "encode_texts",
+        "mock_embed_texts",
+        "is_sentence_transformers_available",
+    }:
+        import indexora.semantic as _semantic
+
+        return getattr(_semantic, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

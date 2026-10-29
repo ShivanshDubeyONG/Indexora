@@ -25,6 +25,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** while evaluating only ~15% of database distances.
 - **Phase 11 (Mutations, Filtering & Persistence):** Complete. Implemented incremental additions (`add`), deletions (`delete`), filtered candidate search (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core index implementations. Features pickle-free `.npy` storage, SHA-256 manifest integrity verification, CSR graph serialization for HNSW without re-indexing, and codebook preservation for IVF-PQ without retraining.
 - **Phase 12A (Interactive Index Lab):** Complete. Built a local-first interactive web laboratory in Streamlit backed directly by Indexora's actual vector engines. Features interactive query search with 2D PCA spatial maps, comparative accuracy-vs-latency benchmarks across all 5 core indexes, real-time incremental additions and tombstone deletions, and atomic disk persistence verification with SHA-256 checksums.
+- **Phase 12B (Semantic Text Search Integration):** Complete. Delivered end-to-end natural language semantic search backed directly by Indexora's native vector retrieval engines (Exact BLAS, IVF-Flat, and HNSW) and pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). Features a curated 25-document technical corpus across 5 engineering domains, strict separation of embedding time from indexing time, exact top-$k$ recall evaluation on live queries, category filtering, and mathematical equivalence between unit-vector squared L2 distance and cosine similarity. All 325 tests pass completely offline.
 
 ## Project Conventions
 
@@ -56,10 +57,14 @@ source venv/bin/activate
 
 ### Installation
 
-Install Indexora in editable mode with development, benchmark, and UI dependencies:
+Install Indexora in editable mode with development, benchmark, UI, and optional semantic search dependencies:
 
 ```bash
+# Core + development & UI
 pip install -e ".[dev,benchmark,ui]"
+
+# Include neural text embeddings (sentence-transformers & torch)
+pip install -e ".[dev,benchmark,ui,semantic]"
 ```
 
 ### Running Tests
@@ -329,11 +334,75 @@ python -m indexora.ui
    - Real-time incremental vector additions with custom/auto IDs.
    - Dynamic vector deletions with tombstone routing preservation in HNSW.
    - Atomic directory save & load: writes pickle-free `.npy` arrays and `manifest.json` with SHA-256 verification, and executes a verification query on the loaded instance.
+5. **Semantic Text Search (Phase 12B):**
+   - Natural language queries across a 25-document technical corpus spanning 5 domains.
+   - Decoupled embedding latency ($t_{\text{embed}}$) from vector index retrieval latency ($t_{\text{search}}$).
+   - Dynamic parameter controls (`nprobe`, `ef_search`, category filtering).
+   - Result cards displaying Rank, Title, Category, Exact Top-k Match status, Squared L2 Distance, and Cosine Similarity.
+   - Graceful offline fallback with deterministic mock embedder when deep learning dependencies are absent.
 
 > **Data & Performance Disclosure:**
-> - The Lab uses **synthetic numerical vectors in $\mathbb{R}^d$** generated from clustered Gaussian distributions to illustrate spatial indexing mechanics. It is **not** semantic text search or embedding retrieval.
+> - Tabs 1–4 of the Lab use **synthetic numerical vectors in $\mathbb{R}^d$** generated from clustered Gaussian distributions to illustrate spatial indexing mechanics. Tab 5 demonstrates **genuine semantic text search** using dense 384-dimensional sentence embeddings.
 > - On small synthetic datasets ($N \approx 120$), Exact BLAS often reports lower query latency than HNSW or IVF because BLAS matrix multiplication executes in optimized C/Fortran libraries, whereas Python-level graph navigation and cluster lookups incur interpreter loop overhead.
 > - Whether and at what scale approximate indexes (IVF, HNSW) surpass exact search in wall-clock throughput depends on vector dimensionality, cluster separation, target recall ($k$, `nprobe`, `ef_search`), hardware multi-threading, and implementation language overhead. Run Indexora's offline benchmark harness (`python -m indexora.benchmark`) to measure empirical trade-offs for specific workloads.
+
+---
+
+## Semantic Text Search (Phase 12B)
+
+Indexora's vector indexes are strictly metric-agnostic: any dense vector representation can be indexed and queried. In Phase 12B, Indexora connects pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`) with its native vector search engines.
+
+### Mathematical Equivalence: Cosine Similarity via Squared L2
+
+For unit-normalized vectors ($\|q\|_2 = \|x\|_2 = 1$):
+$$\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot x) = 2 - 2 \cos(q, x)$$
+
+Therefore, ranking candidates by **ascending squared Euclidean distance** $\|q - x\|^2 \in [0, 4]$ is mathematically identical to ranking by **descending cosine similarity** $\cos(q, x) \in [-1, 1]$. Indexora's BLAS kernels, Voronoi cluster centroids, and HNSW graph exploration execute cosine ranking without modifying the underlying distance contracts.
+
+### Quickstart (Python API)
+
+```python
+from indexora.semantic import build_semantic_engine
+
+# Build an HNSW-backed semantic search engine over the curated technical corpus
+engine = build_semantic_engine(index_type="HNSW", hnsw_m=8, hnsw_ef_search=32)
+
+# Query with natural language text
+result = engine.search("How do attention mechanisms in language models work?", k=3)
+
+print(f"Text embed time: {result.embed_time_ms:.2f} ms")
+print(f"Index search time: {result.latency_ms:.3f} ms")
+
+for rank, (doc, dist, sim) in enumerate(zip(result.retrieved_documents, result.distances, result.cosine_similarities), start=1):
+    print(f"#{rank} [{doc.category}] {doc.title} (dist={dist:.4f}, sim={sim:.4f})")
+```
+
+---
+
+## 2-Minute Project Walkthrough
+
+Explore the entire Indexora engine from first principles in 4 quick steps:
+
+1. **Verify Correctness (15s):**
+   ```bash
+   pytest -q
+   ```
+   Runs 325 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
+
+2. **Run the Offline Smoke Benchmark (5s):**
+   ```bash
+   python -m indexora.benchmark --smoke --no-plot
+   ```
+   Runs an offline synthetic benchmark verifying exact search baselines, multi-probe IVF recall, and distance computation tracking.
+
+3. **Launch the Interactive Index Lab (10s):**
+   ```bash
+   streamlit run src/indexora/ui.py
+   ```
+   Opens the web lab in your browser. Inspect 2D PCA spatial maps, benchmark live recall-vs-latency curves across all 5 index architectures, and test incremental mutations.
+
+4. **Experience End-to-End Semantic Search (30s):**
+   Switch to the **"📚 Semantic Text Search"** tab in the Lab (or run the Python snippet above). Click an example technical query (e.g. *"LSM-tree write performance and disk flushing"*), switch between Exact BLAS, IVF-Flat, and HNSW, and inspect the latency breakdown and exact top-$k$ match verification.
 
 ## Documentation
 
