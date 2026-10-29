@@ -73,13 +73,30 @@ __all__ = [
     "RunMetrics",
     "BenchmarkResult",
     "run_benchmark",
+    "FaissFlatIndex",
+    "FaissIVFFlatIndex",
+    "HnswlibIndex",
+    "is_faiss_available",
+    "is_hnswlib_available",
 ]
 
 
 def __getattr__(name: str):
-    """Lazy import benchmark symbols to avoid runpy RuntimeWarning when executing -m indexora.benchmark."""
+    """Lazy import benchmark and adapter symbols to avoid unneeded dependency overhead."""
     if name in {"BenchmarkConfig", "BenchmarkResult", "RunMetrics", "run_benchmark"}:
         import indexora.benchmark as _bench
 
         return getattr(_bench, name)
+
+    if name in {
+        "FaissFlatIndex",
+        "FaissIVFFlatIndex",
+        "HnswlibIndex",
+        "is_faiss_available",
+        "is_hnswlib_available",
+    }:
+        import indexora.adapters as _adapters
+
+        return getattr(_adapters, name)
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

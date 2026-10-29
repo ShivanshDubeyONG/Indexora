@@ -209,6 +209,15 @@ library version and parameters.
 **Gate:** core tests pass without optional libraries; comparisons share
 dataset, metric, query set, and recall definition.
 
+*Status: Complete & Verified.* 173 tests passing.
+- Implemented `FaissFlatIndex`, `FaissIVFFlatIndex`, and `HnswlibIndex` in `src/indexora/adapters.py`.
+- Enforced strict output container conformance returning frozen `SearchResult(distances, ids, mask)`.
+- Maintained squared Euclidean distance metric bit-for-bit parity and arbitrary `int64` ID support (including negative IDs).
+- Enforced optional dependency isolation via `is_faiss_available()` and `is_hnswlib_available()`, raising clear `ImportError` on missing packages.
+- Configured `[project.optional-dependencies]` with `adapters = ["faiss-cpu>=1.7.4", "hnswlib>=0.7.0"]`.
+- Added unit tests in `tests/test_adapters.py` testing oracle parity, edge cases, negative IDs, all-probe IVF parity, storage properties, and mock behavior for missing dependencies.
+- Integrated adapter comparisons into `src/indexora/benchmark.py` via `--compare-faiss` and `--compare-hnswlib`. Verified via synthetic smoke runs.
+
 ### Phase 8 --- Profiling/acceleration (SHARED)
 
 Profile current code. Select one hot path only if profiling justifies

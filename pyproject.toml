@@ -24,6 +24,10 @@ dev = [
 benchmark = [
     "matplotlib>=3.5.0",
 ]
+adapters = [
+    "faiss-cpu>=1.7.4",
+    "hnswlib>=0.7.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

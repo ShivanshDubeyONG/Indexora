@@ -58,6 +58,8 @@ class BenchmarkConfig:
     dataset_type: str = "synthetic"
     base_path: str | None = None
     query_path: str | None = None
+    compare_faiss: bool = False
+    compare_hnswlib: bool = False
 
     def __post_init__(self) -> None:
         if self.k <= 0:
@@ -318,6 +320,9 @@ class BenchmarkResult:
 
         exact_ref_runs = [r for r in self.runs if r.index_name in ("exact", "exact_reference")]
         exact_blas_runs = [r for r in self.runs if r.index_name == "exact_blas"]
+        faiss_flat_runs = [r for r in self.runs if r.index_name == "faiss_flat"]
+        faiss_ivf_runs = [r for r in self.runs if r.index_name == "faiss_ivf_flat"]
+        hnsw_runs = [r for r in self.runs if r.index_name == "hnswlib"]
         ivf_runs = [r for r in self.runs if r.index_name == "ivf_flat"]
 
         nlist_groups: dict[int, list[RunMetrics]] = {}
@@ -365,6 +370,41 @@ class BenchmarkResult:
                 zorder=5,
             )
 
+        if faiss_flat_runs:
+            ff = faiss_flat_runs[0]
+            ax.scatter(
+                [ff.per_query_p50_ms],
+                [ff.recall_at_k],
+                color="darkorange",
+                s=110,
+                marker="^",
+                label=f"FAISS Flat (p50={ff.per_query_p50_ms:.2f}ms)",
+                zorder=5,
+            )
+
+        if faiss_ivf_runs:
+            faiss_nl_groups: dict[int, list[RunMetrics]] = {}
+            for r in faiss_ivf_runs:
+                nl = int(r.parameters.get("nlist", 0))
+                faiss_nl_groups.setdefault(nl, []).append(r)
+            for nl, group in sorted(faiss_nl_groups.items()):
+                group_sorted = sorted(group, key=lambda x: int(x.parameters.get("nprobe", 0)))
+                lats = [x.per_query_p50_ms for x in group_sorted]
+                recs = [x.recall_at_k for x in group_sorted]
+                ax.plot(lats, recs, marker="v", linestyle="--", label=f"FAISS IVF-Flat (nlist={nl})")
+                for x, y, run in zip(lats, recs, group_sorted):
+                    p = run.parameters.get("nprobe", "")
+                    ax.annotate(f"faiss p={p}", (x, y), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7)
+
+        if hnsw_runs:
+            hnsw_sorted = sorted(hnsw_runs, key=lambda x: int(x.parameters.get("ef_search", 0)))
+            lats = [x.per_query_p50_ms for x in hnsw_sorted]
+            recs = [x.recall_at_k for x in hnsw_sorted]
+            ax.plot(lats, recs, marker="x", linestyle=":", color="green", label="hnswlib")
+            for x, y, run in zip(lats, recs, hnsw_sorted):
+                ef = run.parameters.get("ef_search", "")
+                ax.annotate(f"ef={ef}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
+
         ax.set_title(f"Recall@{k_val} vs. Per-Query p50 Latency\n{ds_name} (N={n_base:,}, d={d_dim})")
         ax.set_xlabel("p50 Individual Query Latency (ms)")
         ax.set_ylabel(f"Recall@{k_val}")
@@ -410,6 +450,18 @@ class BenchmarkResult:
                 s=100,
                 marker="D",
                 label=f"Exact Flat (BLAS) (N={int(ex_b.distance_computations_per_query):,})",
+                zorder=5,
+            )
+
+        if faiss_flat_runs:
+            ff = faiss_flat_runs[0]
+            ax.scatter(
+                [ff.distance_computations_per_query],
+                [ff.recall_at_k],
+                color="darkorange",
+                s=110,
+                marker="^",
+                label=f"FAISS Flat (N={int(ff.distance_computations_per_query):,})",
                 zorder=5,
             )
 
@@ -904,6 +956,224 @@ def run_benchmark(
                     f"DC/Q={ivf_dc:6.0f} (Cent={ivf_centroid_dc:4.0f}, Cand={ivf_cand_dc:4.0f})"
                 )
 
+    # 4. Reference Library Comparison Adapters (Phase 7)
+    if config.compare_faiss:
+        from indexora.adapters import FaissFlatIndex, FaissIVFFlatIndex, is_faiss_available
+
+        if not is_faiss_available():
+            if verbose:
+                print("\n[Warning] FAISS requested for comparison but is not installed. Skipping.")
+        else:
+            if verbose:
+                print("\n[Comparison 1/2] Benchmarking FAISS Flat Index...")
+            t0_ff_b = time.perf_counter()
+            faiss_flat_idx = FaissFlatIndex(database=dataset.base, ids=dataset.base_ids)
+            ff_build_time = time.perf_counter() - t0_ff_b
+
+            lats_ff, p50_ff, p95_ff, p99_ff, mean_ff, std_ff, min_ff, max_ff, cnt_ff = (
+                _measure_per_query_latency(
+                    search_single_fn=lambda q, k: faiss_flat_idx.search(q, k=k),
+                    queries_subset=queries_latency_sample,
+                    k=config.k,
+                    warmup_runs=config.warmup_runs,
+                )
+            )
+
+            qps_ff, mean_batch_ff = _measure_batch_throughput(
+                search_batch_fn=lambda q, k: faiss_flat_idx.search(q, k=k),
+                queries=dataset.queries,
+                k=config.k,
+                warmup_runs=config.warmup_runs,
+                repeat_runs=config.repeat_runs,
+            )
+
+            ff_res = faiss_flat_idx.search(dataset.queries, k=config.k)
+            recall_ff = compute_recall_at_k(ff_res, gt_result, k=config.k)
+            dist_rec_ff = compute_distance_aware_recall_at_k(ff_res, gt_result, k=config.k)
+            peak_rss_ff = get_process_peak_rss_bytes()
+
+            ff_metrics = RunMetrics(
+                index_name="faiss_flat",
+                parameters={},
+                build_time_seconds=ff_build_time,
+                build_peak_tracemalloc_bytes=0,
+                index_memory_bytes=faiss_flat_idx.index_memory_bytes,
+                index_memory_mib=faiss_flat_idx.index_memory_mib,
+                bytes_per_vector=faiss_flat_idx.bytes_per_vector,
+                per_query_latencies_ms=lats_ff,
+                per_query_p50_ms=p50_ff,
+                per_query_p95_ms=p95_ff,
+                per_query_p99_ms=p99_ff,
+                per_query_mean_ms=mean_ff,
+                per_query_min_ms=min_ff,
+                per_query_max_ms=max_ff,
+                per_query_sample_count=cnt_ff,
+                batch_qps=qps_ff,
+                batch_mean_latency_ms=mean_batch_ff,
+                batch_repeat_runs=config.repeat_runs,
+                recall_at_k=recall_ff,
+                distance_computations_per_query=float(N),
+                per_query_std_ms=std_ff,
+                distance_aware_recall_at_k=dist_rec_ff,
+                peak_process_rss_bytes=peak_rss_ff,
+                total_distance_computations=Q * N,
+                candidate_distance_computations_per_query=float(N),
+            )
+            result.runs.append(ff_metrics)
+            if verbose:
+                print(
+                    f"  FAISS Flat:        p50={p50_ff:.2f}ms (std={std_ff:.2f}ms) | QPS={qps_ff:.1f} | "
+                    f"Recall={recall_ff:.4f} | DistRec={dist_rec_ff:.4f}"
+                )
+
+            # FAISS IVF sweeps
+            for nlist in config.nlist_values:
+                if nlist > N:
+                    continue
+                if verbose:
+                    print(f"  Building FAISS IVF-Flat (nlist={nlist})...")
+                t0_fivf_b = time.perf_counter()
+                faiss_ivf_idx = FaissIVFFlatIndex(
+                    database=dataset.base,
+                    nlist=nlist,
+                    ids=dataset.base_ids,
+                    seed=config.seed,
+                )
+                fivf_build_time = time.perf_counter() - t0_fivf_b
+
+                for nprobe in config.nprobe_values:
+                    if nprobe > nlist:
+                        continue
+                    lats_fivf, p50_fivf, p95_fivf, p99_fivf, mean_fivf, std_fivf, min_fivf, max_fivf, cnt_fivf = (
+                        _measure_per_query_latency(
+                            search_single_fn=lambda q, k: faiss_ivf_idx.search(q, k=k, nprobe=nprobe),
+                            queries_subset=queries_latency_sample,
+                            k=config.k,
+                            warmup_runs=config.warmup_runs,
+                        )
+                    )
+
+                    qps_fivf, mean_batch_fivf = _measure_batch_throughput(
+                        search_batch_fn=lambda q, k: faiss_ivf_idx.search(q, k=k, nprobe=nprobe),
+                        queries=dataset.queries,
+                        k=config.k,
+                        warmup_runs=config.warmup_runs,
+                        repeat_runs=config.repeat_runs,
+                    )
+
+                    fivf_res = faiss_ivf_idx.search(dataset.queries, k=config.k, nprobe=nprobe)
+                    recall_fivf = compute_recall_at_k(fivf_res, gt_result, k=config.k)
+                    dist_rec_fivf = compute_distance_aware_recall_at_k(fivf_res, gt_result, k=config.k)
+                    peak_rss_fivf = get_process_peak_rss_bytes()
+
+                    fivf_metrics = RunMetrics(
+                        index_name="faiss_ivf_flat",
+                        parameters={"nlist": nlist, "nprobe": nprobe},
+                        build_time_seconds=fivf_build_time,
+                        build_peak_tracemalloc_bytes=0,
+                        index_memory_bytes=faiss_ivf_idx.index_memory_bytes,
+                        index_memory_mib=faiss_ivf_idx.index_memory_mib,
+                        bytes_per_vector=faiss_ivf_idx.bytes_per_vector,
+                        per_query_latencies_ms=lats_fivf,
+                        per_query_p50_ms=p50_fivf,
+                        per_query_p95_ms=p95_fivf,
+                        per_query_p99_ms=p99_fivf,
+                        per_query_mean_ms=mean_fivf,
+                        per_query_min_ms=min_fivf,
+                        per_query_max_ms=max_fivf,
+                        per_query_sample_count=cnt_fivf,
+                        batch_qps=qps_fivf,
+                        batch_mean_latency_ms=mean_batch_fivf,
+                        batch_repeat_runs=config.repeat_runs,
+                        recall_at_k=recall_fivf,
+                        distance_computations_per_query=0.0,
+                        per_query_std_ms=std_fivf,
+                        distance_aware_recall_at_k=dist_rec_fivf,
+                        peak_process_rss_bytes=peak_rss_fivf,
+                    )
+                    result.runs.append(fivf_metrics)
+                    if verbose:
+                        print(
+                            f"    FAISS IVF nprobe={nprobe:<3d} -> Recall@{config.k}={recall_fivf:.4f} | "
+                            f"p50={p50_fivf:6.2f}ms | QPS={qps_fivf:7.1f}"
+                        )
+
+    if config.compare_hnswlib:
+        from indexora.adapters import HnswlibIndex, is_hnswlib_available
+
+        if not is_hnswlib_available():
+            if verbose:
+                print("\n[Warning] hnswlib requested for comparison but is not installed. Skipping.")
+        else:
+            if verbose:
+                print("\n[Comparison 2/2] Benchmarking hnswlib Graph Index...")
+            t0_hnsw_b = time.perf_counter()
+            hnsw_idx = HnswlibIndex(
+                database=dataset.base,
+                ids=dataset.base_ids,
+                M=16,
+                ef_construction=200,
+                ef_search=50,
+                random_seed=config.seed,
+            )
+            hnsw_build_time = time.perf_counter() - t0_hnsw_b
+
+            for ef in (10, 20, 50, 100):
+                hnsw_idx.set_ef_search(ef)
+                lats_h, p50_h, p95_h, p99_h, mean_h, std_h, min_h, max_h, cnt_h = (
+                    _measure_per_query_latency(
+                        search_single_fn=lambda q, k: hnsw_idx.search(q, k=k, ef_search=ef),
+                        queries_subset=queries_latency_sample,
+                        k=config.k,
+                        warmup_runs=config.warmup_runs,
+                    )
+                )
+
+                qps_h, mean_batch_h = _measure_batch_throughput(
+                    search_batch_fn=lambda q, k: hnsw_idx.search(q, k=k, ef_search=ef),
+                    queries=dataset.queries,
+                    k=config.k,
+                    warmup_runs=config.warmup_runs,
+                    repeat_runs=config.repeat_runs,
+                )
+
+                h_res = hnsw_idx.search(dataset.queries, k=config.k, ef_search=ef)
+                recall_h = compute_recall_at_k(h_res, gt_result, k=config.k)
+                dist_rec_h = compute_distance_aware_recall_at_k(h_res, gt_result, k=config.k)
+                peak_rss_h = get_process_peak_rss_bytes()
+
+                h_metrics = RunMetrics(
+                    index_name="hnswlib",
+                    parameters={"ef_search": ef, "M": 16, "ef_construction": 200},
+                    build_time_seconds=hnsw_build_time,
+                    build_peak_tracemalloc_bytes=0,
+                    index_memory_bytes=hnsw_idx.index_memory_bytes,
+                    index_memory_mib=hnsw_idx.index_memory_mib,
+                    bytes_per_vector=hnsw_idx.bytes_per_vector,
+                    per_query_latencies_ms=lats_h,
+                    per_query_p50_ms=p50_h,
+                    per_query_p95_ms=p95_h,
+                    per_query_p99_ms=p99_h,
+                    per_query_mean_ms=mean_h,
+                    per_query_min_ms=min_h,
+                    per_query_max_ms=max_h,
+                    per_query_sample_count=cnt_h,
+                    batch_qps=qps_h,
+                    batch_mean_latency_ms=mean_batch_h,
+                    batch_repeat_runs=config.repeat_runs,
+                    recall_at_k=recall_h,
+                    distance_computations_per_query=0.0,
+                    per_query_std_ms=std_h,
+                    distance_aware_recall_at_k=dist_rec_h,
+                    peak_process_rss_bytes=peak_rss_h,
+                )
+                result.runs.append(h_metrics)
+                if verbose:
+                    print(
+                        f"    hnswlib ef={ef:<3d} -> Recall@{config.k}={recall_h:.4f} | "
+                        f"p50={p50_h:6.2f}ms | QPS={qps_h:7.1f}"
+                    )
+
     if verbose:
         print("\n" + "=" * 105)
         print("BENCHMARK SWEEP COMPLETE -- SUMMARY TABLE")
@@ -956,6 +1226,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=500,
         help="Number of individual queries sampled for per-query latency percentiles",
     )
+    parser.add_argument(
+        "--compare-faiss",
+        action="store_true",
+        help="Include FAISS flat and IVF-flat baselines if faiss is installed",
+    )
+    parser.add_argument(
+        "--compare-hnswlib",
+        action="store_true",
+        help="Include hnswlib baseline if hnswlib is installed",
+    )
     parser.add_argument("--no-plot", action="store_true", help="Skip generating plot images")
 
     args = parser.parse_args(argv)
@@ -982,6 +1262,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             nprobe_values=(1, 5),
             smoke=True,
             dataset_type="synthetic",
+            compare_faiss=args.compare_faiss,
+            compare_hnswlib=args.compare_hnswlib,
         )
         dataset_name = "Synthetic Smoke Clustered"
     elif args.dataset == "sift_fvecs":
@@ -1027,6 +1309,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_type="sift_fvecs",
             base_path=args.base_path,
             query_path=args.query_path,
+            compare_faiss=args.compare_faiss,
+            compare_hnswlib=args.compare_hnswlib,
         )
         dataset_name = f"SIFT-{n_base_req // 1000}k Subset"
     else:
@@ -1054,6 +1338,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             nprobe_values=np_vals,
             smoke=False,
             dataset_type="synthetic",
+            compare_faiss=args.compare_faiss,
+            compare_hnswlib=args.compare_hnswlib,
         )
         dataset_name = f"Synthetic Clustered (N={args.n_base:,})"
 

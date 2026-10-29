@@ -134,6 +134,44 @@ Evaluation on the first 100,000 base vectors and 1,000 queries ($d=128$, $k=10$,
 - **Peak Process RSS (MiB):** Peak resident set size of the process across execution, captured directly from OS memory counters.
 - **Exact Baselines:** Benchmarks track both `exact_reference` (coordinate-difference direct kernel, correctness oracle) and `exact_blas` (norm expansion via BLAS matrix multiplication).
 
+## Reference Adapters (Phase 7)
+
+Indexora provides reference adapters for industrial vector search libraries to validate correctness, compare recall/latency trade-offs, and ground educational benchmarks:
+- **`FaissFlatIndex`:** Exact flat L2 scan using `faiss.IndexFlatL2` + `IndexIDMap2`.
+- **`FaissIVFFlatIndex`:** Approximate inverted-file scan using `faiss.IndexIVFFlat` + `IndexIDMap2` with dynamic runtime `nprobe` tuning.
+- **`HnswlibIndex`:** Graph-based approximate nearest neighbor search using `hnswlib.Index` (L2 space).
+
+### Installation
+
+FAISS and hnswlib are purely optional dependencies. Indexora installs and runs without them:
+
+```bash
+# Install with adapter support
+pip install ".[adapters]"
+
+# Or install manually
+pip install faiss-cpu hnswlib
+```
+
+### Adapter Contracts & Parity
+
+All adapters implement Indexora's standard index interface:
+- **Normalized Output:** Return immutable `SearchResult(distances, ids, mask)` containers.
+- **Distance Metric:** Squared Euclidean distance $\|q - x\|_2^2$ consistent with Indexora's distance contract.
+- **ID Support:** Arbitrary `int64` IDs including negative values (`-1`, `-42`) without sentinel collision.
+- **Memory Tracking:** Report `.index_memory_bytes`, `.index_memory_mib`, and `.bytes_per_vector`.
+- **Graceful Degradation:** Raise informative `ImportError` with installation instructions when optional libraries are not installed.
+
+### Comparative Benchmarking
+
+```bash
+# Run benchmark sweep including FAISS baselines
+python -m indexora.benchmark --compare-faiss
+
+# Run SIFT-100k benchmark with external reference comparisons
+python -m indexora.benchmark --dataset sift_fvecs --base-path sift/sift_base.fvecs --query-path sift/sift_query.fvecs --compare-faiss
+```
+
 ## Documentation
 
 - `plan/project srs.md`: Project Brief & Software Requirements Specification (SRS v3.0)
