@@ -24,8 +24,10 @@ from indexora.ivf import IVFFlatIndex
 from indexora.ivfpq import IVFPQIndex
 from indexora.lab import (
     IndexBenchmarkMetrics,
+    IndexCache,
     LabDataset,
     LabSession,
+    compute_exact_ground_truth,
     evaluate_index_search,
     generate_lab_dataset,
 )
@@ -105,55 +107,52 @@ def _init_session_state() -> None:
         st.session_state.lab_session = LabSession(index=idx, index_name="ExactBlasIndex", d=ds.d)
     if "benchmark_results" not in st.session_state:
         st.session_state.benchmark_results = None
+    if "index_cache" not in st.session_state:
+        st.session_state.index_cache = IndexCache()
 
 
-def _build_selected_index(
+def _get_or_build_index(
     index_type: str,
     ds: LabDataset,
+    cache: IndexCache,
     ivf_nlist: int = 4,
-    ivf_nprobe: int = 2,
     pq_m: int = 2,
     pq_ksub: int = 4,
     hnsw_m: int = 8,
     hnsw_ef_construction: int = 32,
-    hnsw_ef_search: int = 32,
-) -> tuple[Any, float]:
-    """Instantiate and build a chosen Indexora index on dataset vectors, timing build duration."""
-    t0 = time.perf_counter()
+) -> tuple[Any, float, bool]:
+    """Retrieve index from cache or build it if build-time parameters or dataset changed.
+
+    Separates build-time hyperparameters (e.g. nlist, M, ef_construction) from
+    query-time exploration parameters (e.g. nprobe, ef_search) to prevent expensive
+    re-indexing on ordinary UI rerenders.
+    """
     if index_type == "Exact Flat (Reference)":
-        idx = ExactFlatIndex(database=ds.base, ids=ds.base_ids)
+        build_params: dict[str, Any] = {}
+        builder = lambda: ExactFlatIndex(database=ds.base, ids=ds.base_ids)
     elif index_type == "Exact BLAS":
-        idx = ExactBlasIndex(database=ds.base, ids=ds.base_ids)
+        build_params = {}
+        builder = lambda: ExactBlasIndex(database=ds.base, ids=ds.base_ids)
     elif index_type == "IVF-Flat":
-        idx = IVFFlatIndex(
-            database=ds.base,
-            ids=ds.base_ids,
-            nlist=ivf_nlist,
-            nprobe=ivf_nprobe,
-        )
+        build_params = {"nlist": ivf_nlist}
+        builder = lambda: IVFFlatIndex(database=ds.base, ids=ds.base_ids, nlist=ivf_nlist)
     elif index_type == "IVF-PQ":
-        idx = IVFPQIndex(
-            database=ds.base,
-            ids=ds.base_ids,
-            nlist=ivf_nlist,
-            M=pq_m,
-            k_sub=pq_ksub,
-            nprobe=ivf_nprobe,
-        )
+        build_params = {"nlist": ivf_nlist, "M": pq_m, "k_sub": pq_ksub}
+        builder = lambda: IVFPQIndex(database=ds.base, ids=ds.base_ids, nlist=ivf_nlist, M=pq_m, k_sub=pq_ksub)
     elif index_type == "HNSW":
-        idx = HNSWIndex(
+        build_params = {"M": hnsw_m, "ef_construction": hnsw_ef_construction, "seed": ds.seed}
+        builder = lambda: HNSWIndex(
             database=ds.base,
             ids=ds.base_ids,
             M=hnsw_m,
             ef_construction=hnsw_ef_construction,
-            ef_search=hnsw_ef_search,
             random_seed=ds.seed,
         )
     else:
-        idx = ExactBlasIndex(database=ds.base, ids=ds.base_ids)
-    t1 = time.perf_counter()
-    build_time_ms = (t1 - t0) * 1000.0
-    return idx, build_time_ms
+        build_params = {}
+        builder = lambda: ExactBlasIndex(database=ds.base, ids=ds.base_ids)
+
+    return cache.get_or_build(index_type, ds, build_params, builder)
 
 
 def main() -> None:
@@ -192,6 +191,8 @@ def main() -> None:
             idx = ExactBlasIndex(database=ds.base, ids=ds.base_ids)
             st.session_state.lab_session = LabSession(index=idx, index_name="ExactBlasIndex", d=ds.d)
             st.session_state.benchmark_results = None
+            if "index_cache" in st.session_state:
+                st.session_state.index_cache.clear()
             st.success("New synthetic dataset generated!")
 
         st.markdown("---")
@@ -342,33 +343,50 @@ def main() -> None:
             q_idx = int(selected_query_label.split("#")[1].split(" ")[0])
             query_vec = ds.queries[q_idx]
 
-        # Compute ground truth for this query
-        gt_single = ds.get_ground_truth(k=k_val)
-        gt_ids_for_q = set(gt_single.ids[q_idx if selected_query_label != "Custom Random Vector" else 0].tolist())
-
-        # Construct and Search Index
-        idx_instance, _ = _build_selected_index(
-            index_type=selected_index_name,
-            ds=ds,
-            ivf_nlist=4,
-            ivf_nprobe=nprobe_val,
-            hnsw_ef_search=ef_search_val,
-        )
-
-        # Parse Filter IDs
+        # Parse Filter IDs before ground truth and index search
         applied_filter = None
         if filter_mode == "Even IDs Only":
             applied_filter = lambda eid: eid % 2 == 0
         elif filter_mode == "Exclude True Top-1 ID":
-            top1_id = gt_single.ids[q_idx if selected_query_label != "Custom Random Vector" else 0][0]
+            unfiltered_gt = compute_exact_ground_truth(database=ds.base, ids=ds.base_ids, query=query_vec, k=1)
+            top1_id = int(unfiltered_gt.ids[0]) if len(unfiltered_gt.ids) > 0 else -1
             applied_filter = lambda eid, excluded=top1_id: eid != excluded
         elif filter_mode == "Custom ID List":
             try:
                 applied_filter = set(int(x.strip()) for x in custom_filter_input.split(",") if x.strip())
             except ValueError:
                 st.error("Invalid ID format in custom filter. Enter comma-separated integers.")
+                applied_filter = set()
 
-        # Execute Search
+        # Compute exact ground truth specifically for this query and the active filter
+        filtered_gt = compute_exact_ground_truth(
+            database=ds.base,
+            ids=ds.base_ids,
+            query=query_vec,
+            k=k_val,
+            filter_ids=applied_filter,
+        )
+        eligible_gt_ids = set(filtered_gt.ids.tolist())
+        num_eligible_live = len(eligible_gt_ids)
+
+        # Retrieve or Build Index from Cache (separating build params from query params)
+        idx_instance, build_time_ms, was_cached = _get_or_build_index(
+            index_type=selected_index_name,
+            ds=ds,
+            cache=st.session_state.index_cache,
+            ivf_nlist=4,
+            pq_m=2,
+            pq_ksub=4,
+            hnsw_m=8,
+            hnsw_ef_construction=32,
+        )
+
+        if was_cached:
+            st.caption(f"⚡ Reused cached index instance ({selected_index_name}).")
+        else:
+            st.caption(f"🔨 Built index ({selected_index_name}) in {build_time_ms:.2f} ms.")
+
+        # Execute Search with Query-Time Parameters
         t_start = time.perf_counter()
         search_kwargs: dict[str, Any] = {}
         if selected_index_name in ("IVF-Flat", "IVF-PQ"):
@@ -380,6 +398,9 @@ def main() -> None:
         search_time_ms = (time.perf_counter() - t_start) * 1000.0
 
         # Display Metrics
+        retrieved_ids = set(search_res.ids.tolist())
+        hits = len(retrieved_ids & eligible_gt_ids)
+
         m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.metric("Query Latency", f"{search_time_ms:.3f} ms")
@@ -387,26 +408,30 @@ def main() -> None:
             dc_val = search_res.distance_computations if search_res.distance_computations is not None else ds.N
             st.metric("Distances Evaluated", f"{dc_val} / {ds.N}")
         with m3:
-            retrieved_ids = set(search_res.ids.tolist())
-            hits = len(retrieved_ids & gt_ids_for_q)
-            rec = hits / max(1, len(gt_ids_for_q)) if filter_mode == "None (All Vectors Eligible)" else None
-            st.metric("Exact Top-k Match Rate", f"{rec * 100:.1f}%" if rec is not None else "Filtered")
+            if num_eligible_live == 0:
+                match_label = "100.0% (Empty Filter Set)" if len(retrieved_ids) == 0 else "0.0%"
+            else:
+                match_label = f"{(hits / num_eligible_live) * 100.0:.1f}% ({hits}/{num_eligible_live})"
+            st.metric("Filtered Exact Match Rate", match_label)
         with m4:
-            st.metric("Retrieved Neighbors", f"{len(search_res.ids)} / {k_val}")
+            st.metric("Retrieved Candidates", f"{len(search_res.ids)} / {k_val}")
 
         # Display Results Table
         st.markdown("#### Retrieved Nearest Neighbors")
         if len(search_res.ids) == 0:
-            st.warning("No eligible candidates found matching the query and filter criteria.")
+            if num_eligible_live == 0:
+                st.info("ℹ️ Filter restriction resulted in 0 eligible database vectors. Empty result correctly matches filtered ground truth.")
+            else:
+                st.warning("No eligible candidates retrieved by the index matching the query and filter criteria.")
         else:
             table_rows = []
             for rank_i, (dist_val, id_val) in enumerate(zip(search_res.distances, search_res.ids), start=1):
-                is_exact_match = id_val in gt_ids_for_q
+                is_exact_match = id_val in eligible_gt_ids
                 table_rows.append({
                     "Rank": rank_i,
                     "External ID": int(id_val),
                     "Squared L2 Distance (||q - x||²)": f"{dist_val:.5f}",
-                    "Exact Top-k Status": "✅ Exact Match" if is_exact_match else "⚡ Approximation",
+                    "Filtered Ground Truth Status": "✅ Exact Match" if is_exact_match else "⚡ Approximation",
                 })
             st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
 
@@ -572,11 +597,18 @@ def main() -> None:
                 plt.close(fig2)
 
             st.info(
-                "💡 **Performance Insight:** On small synthetic datasets ($N \\approx 120$), Exact BLAS can report "
-                "lower query latency than HNSW or IVF because BLAS leverages hardware-optimized C routines over "
-                "a tiny matrix, while Python graph traversals incur interpreter loop overhead. As dataset size "
-                "grows to $N=100{,}000+$, HNSW's logarithmic $O(\\log N)$ scaling and IVF's clustering dramatically "
-                "outperform $O(N)$ exhaustive scans."
+                "💡 **Performance & Scalability Insights:**\n\n"
+                "- **Small-Scale Overheads:** On small synthetic datasets (e.g. $N \\approx 120$), Exact BLAS often "
+                "reports lower query latency than HNSW or IVF because BLAS matrix multiplication runs in optimized, "
+                "compiled C/Fortran libraries, whereas Python-level graph traversals and Voronoi cell lookups incur "
+                "interpreter loop overhead.\n"
+                "- **Algorithmic vs. Wall-Clock Trade-Offs:** While HNSW ($O(\\log N)$ graph exploration) and IVF "
+                "(Voronoi candidate pruning) evaluate significantly fewer vector distances per query, wall-clock "
+                "speedups depend heavily on vector dimensionality, clustering quality, target recall ($k$, `nprobe`, "
+                "`ef_search`), BLAS multi-threading, and implementation language overhead.\n"
+                "- **Evidence-Based Evaluation:** Rather than assuming asymptotic speedups at any fixed dataset size, "
+                "use Indexora's offline benchmark harness (`python -m indexora.benchmark`) to measure empirical "
+                "recall-vs-latency curves for your specific hardware and workload."
             )
 
     # =========================================================================

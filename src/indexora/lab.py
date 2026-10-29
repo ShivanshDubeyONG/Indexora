@@ -47,6 +47,8 @@ class LabDataset:
         Projection matrix of shape `(d, 2)` representing top 2 principal components.
     seed : int
         RNG seed used for deterministic generation.
+    dataset_id : str, default=""
+        Unique identifier for dataset instance used for cache invalidation.
     """
 
     base: np.ndarray
@@ -58,6 +60,7 @@ class LabDataset:
     pca_mean: np.ndarray
     pca_components: np.ndarray
     seed: int
+    dataset_id: str = ""
 
     @property
     def N(self) -> int:
@@ -98,25 +101,71 @@ class LabDataset:
         proj = centered @ self.pca_components
         return proj[0] if is_1d else proj
 
-    def get_ground_truth(self, k: int = 10) -> SearchResult:
-        """Compute exact reference ground truth for all queries against the base database.
+    def get_ground_truth(
+        self,
+        k: int = 10,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
+        query: np.ndarray | None = None,
+    ) -> SearchResult:
+        """Compute exact reference ground truth over eligible vectors.
 
         Parameters
         ----------
         k : int, default=10
             Number of nearest neighbors to retrieve.
+        filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+            Optional ID eligibility filter restricting candidate vectors.
+        query : np.ndarray | None, default=None
+            Specific query vector of shape `(d,)` or batch `(Q, d)`. If None, evaluates `self.queries`.
 
         Returns
         -------
         SearchResult
-            Exact ground-truth result container.
+            Exact ground-truth result container over eligible vectors.
         """
-        return generate_ground_truth(
-            queries=self.queries,
+        q = self.queries if query is None else query
+        return compute_exact_ground_truth(
             database=self.base,
             ids=self.base_ids,
+            query=q,
             k=k,
+            filter_ids=filter_ids,
         )
+
+
+def compute_exact_ground_truth(
+    database: np.ndarray,
+    ids: np.ndarray,
+    query: np.ndarray,
+    k: int = 10,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
+) -> SearchResult:
+    """Compute exact reference ground truth for query vector(s) over eligible live vectors.
+
+    Uses Indexora's Exact BLAS index to perform exhaustive squared-L2 scanning
+    with deterministic ascending (distance, external_id) tie-breaking. Correctly
+    evaluates callable, set, or sequence eligibility filters.
+
+    Parameters
+    ----------
+    database : np.ndarray
+        Database vectors array of shape `(N, d)` with strict `dtype=np.float32`.
+    ids : np.ndarray
+        Array of external entity IDs of shape `(N,)` with strict `dtype=np.int64`.
+    query : np.ndarray
+        Query vector of shape `(d,)` or batch of shape `(Q, d)` with strict `dtype=np.float32`.
+    k : int, default=10
+        Number of nearest neighbors to retrieve.
+    filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+        Eligibility filter restricting candidates to matching external IDs.
+
+    Returns
+    -------
+    SearchResult
+        Ground-truth results containing exact top-k matches over eligible vectors.
+    """
+    exact_idx = ExactBlasIndex(database=database, ids=ids)
+    return exact_idx.search(query, k=k, filter_ids=filter_ids)
 
 
 def generate_lab_dataset(
@@ -191,6 +240,9 @@ def generate_lab_dataset(
     _, _, vt = np.linalg.svd(centered, full_matrices=False)
     pca_components = np.ascontiguousarray(vt[:2].T, dtype=np.float32)  # shape (d, 2)
 
+    # Unique dataset instance identifier for cache invalidation
+    dataset_id = f"ds_s{seed}_N{n_base}_d{d}_c{n_clusters}_std{cluster_std}_{time.time_ns()}"
+
     return LabDataset(
         base=base,
         base_ids=base_ids,
@@ -201,7 +253,93 @@ def generate_lab_dataset(
         pca_mean=pca_mean,
         pca_components=pca_components,
         seed=seed,
+        dataset_id=dataset_id,
     )
+
+
+class IndexCache:
+    """In-memory cache for built Indexora index instances.
+
+    Prevents expensive index rebuilds (k-means clustering in IVF and graph construction
+    in HNSW) during UI rerenders when the dataset and build parameters remain unchanged.
+    Invalidates automatically when build parameters or the dataset change.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str, tuple[tuple[str, Any], ...]], tuple[Any, float]] = {}
+
+    def _make_key(
+        self,
+        index_type: str,
+        dataset_id: str,
+        build_params: dict[str, Any],
+    ) -> tuple[str, str, tuple[tuple[str, Any], ...]]:
+        sorted_params = tuple(sorted((k, v) for k, v in build_params.items()))
+        return (index_type, dataset_id, sorted_params)
+
+    def get(
+        self,
+        index_type: str,
+        dataset_id: str,
+        build_params: dict[str, Any],
+    ) -> tuple[Any, float] | None:
+        """Retrieve a cached (index_instance, build_time_ms) tuple if present."""
+        key = self._make_key(index_type, dataset_id, build_params)
+        return self._cache.get(key)
+
+    def put(
+        self,
+        index_type: str,
+        dataset_id: str,
+        build_params: dict[str, Any],
+        index: Any,
+        build_time_ms: float,
+    ) -> None:
+        """Store an index instance and its build time in the cache."""
+        key = self._make_key(index_type, dataset_id, build_params)
+        self._cache[key] = (index, build_time_ms)
+
+    def get_or_build(
+        self,
+        index_type: str,
+        dataset: LabDataset,
+        build_params: dict[str, Any],
+        builder_fn: Callable[[], Any],
+    ) -> tuple[Any, float, bool]:
+        """Get an existing cached index or build a new one using builder_fn.
+
+        Parameters
+        ----------
+        index_type : str
+            Name of index architecture (e.g. 'IVF-Flat', 'HNSW').
+        dataset : LabDataset
+            Dataset instance containing dataset_id.
+        build_params : dict[str, Any]
+            Dictionary of build-time hyperparameters (excluding query-time parameters).
+        builder_fn : Callable[[], Any]
+            Zero-argument factory creating the index when not cached.
+
+        Returns
+        -------
+        tuple[Any, float, bool]
+            `(index_instance, build_time_ms, was_cached)`
+        """
+        cached = self.get(index_type, dataset.dataset_id, build_params)
+        if cached is not None:
+            return cached[0], cached[1], True
+
+        t0 = time.perf_counter()
+        idx = builder_fn()
+        build_time_ms = (time.perf_counter() - t0) * 1000.0
+        self.put(index_type, dataset.dataset_id, build_params, idx, build_time_ms)
+        return idx, build_time_ms, False
+
+    def clear(self) -> None:
+        """Invalidate all cached indexes."""
+        self._cache.clear()
+
+    def __len__(self) -> int:
+        return len(self._cache)
 
 
 @dataclass(frozen=True)

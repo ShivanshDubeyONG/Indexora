@@ -332,7 +332,8 @@ python -m indexora.ui
 
 > **Data & Performance Disclosure:**
 > - The Lab uses **synthetic numerical vectors in $\mathbb{R}^d$** generated from clustered Gaussian distributions to illustrate spatial indexing mechanics. It is **not** semantic text search or embedding retrieval.
-> - On small synthetic datasets ($N \approx 120$), Exact BLAS can report lower query latency than HNSW or IVF due to Python interpreter overhead vs C-accelerated BLAS matrix operations. On larger datasets ($N \ge 10^5$), HNSW's logarithmic $O(\log N)$ routing and IVF's cluster pruning significantly outperform exhaustive scans.
+> - On small synthetic datasets ($N \approx 120$), Exact BLAS often reports lower query latency than HNSW or IVF because BLAS matrix multiplication executes in optimized C/Fortran libraries, whereas Python-level graph navigation and cluster lookups incur interpreter loop overhead.
+> - Whether and at what scale approximate indexes (IVF, HNSW) surpass exact search in wall-clock throughput depends on vector dimensionality, cluster separation, target recall ($k$, `nprobe`, `ef_search`), hardware multi-threading, and implementation language overhead. Run Indexora's offline benchmark harness (`python -m indexora.benchmark`) to measure empirical trade-offs for specific workloads.
 
 ## Documentation
 
