@@ -698,3 +698,37 @@ def test_ivf_flat_kmeans_convergence_metadata_properties() -> None:
     assert idx_explicit.kmeans_n_iter is None
     assert idx_explicit.kmeans_converged is None
     assert idx_explicit.kmeans_inertia is None
+
+
+def test_ivf_flat_distance_method_validation() -> None:
+    """Verify IVFFlatIndex validates distance_method parameter and exposes property."""
+    rng = np.random.default_rng(42)
+    db = rng.standard_normal((50, 4)).astype(np.float32)
+
+    idx_blas = IVFFlatIndex(database=db, nlist=2, distance_method="blas", seed=42)
+    assert idx_blas.distance_method == "blas"
+
+    idx_ref = IVFFlatIndex(database=db, nlist=2, distance_method="reference", seed=42)
+    assert idx_ref.distance_method == "reference"
+
+    with pytest.raises(ValueError, match="distance_method must be 'blas' or 'reference'"):
+        IVFFlatIndex(database=db, nlist=2, distance_method="invalid")
+
+
+def test_ivf_flat_distance_method_blas_and_reference_parity() -> None:
+    """Verify that distance_method='blas' and 'reference' yield identical top-k IDs."""
+    rng = np.random.default_rng(42)
+    N, d, nlist, Q = 200, 16, 5, 20
+    db = rng.standard_normal((N, d)).astype(np.float32)
+    queries = rng.standard_normal((Q, d)).astype(np.float32)
+    centroids = db[:nlist].copy()
+
+    idx_blas = IVFFlatIndex(database=db, nlist=nlist, centroids=centroids, distance_method="blas")
+    idx_ref = IVFFlatIndex(database=db, nlist=nlist, centroids=centroids, distance_method="reference")
+
+    res_blas = idx_blas.search(queries, k=5, nprobe=3)
+    res_ref = idx_ref.search(queries, k=5, nprobe=3)
+
+    np.testing.assert_array_equal(res_blas.ids, res_ref.ids)
+    np.testing.assert_allclose(res_blas.distances, res_ref.distances, rtol=1e-5, atol=1e-5)
+    assert res_blas.distance_computations == res_ref.distance_computations

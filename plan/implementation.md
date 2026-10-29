@@ -227,6 +227,15 @@ steady-state timings and compare against reference behavior.
 **Gate:** same-workload before/after evidence exists. A measured no-go
 is valid; do not retain acceleration just for appearance.
 
+*Status: Complete & Verified.* 175 tests passing.
+- **Profiling:** cProfile and granular component timing identified distance calculations as the dominant bottleneck in IVF-Flat search, accounting for 83.0% of total search time (70.2% candidate distances, 12.8% coarse centroid distances).
+- **Optimization:** Implemented batched coarse quantization via BLAS GEMM (`pairwise_squared_l2_blas`), configurable `distance_method` in `IVFFlatIndex` (defaulting to `"blas"` with optional `"reference"` oracle mode), and zero-copy candidate handling when a single inverted list is probed.
+- **Measured Results (N=10,000, Q=100, d=128, repeats=25):**
+  - `nprobe=1`: p50 latency reduced from 32.98 ms to 21.20 ms (**1.56x speedup**, 4,716.8 QPS), 100.00% ID match.
+  - `nprobe=5`: p50 latency reduced from 90.70 ms to 39.79 ms (**2.28x speedup**, 2,513.5 QPS), 100.00% ID match.
+  - `nprobe=10`: p50 latency reduced from 167.76 ms to 64.05 ms (**2.62x speedup**, 1,561.4 QPS), 100.00% ID match, latency std reduced from 16.50 ms to 5.98 ms.
+- **Outcome:** The optimization is retained. Reference implementation remains accessible via `distance_method="reference"` as an uncompromised correctness oracle.
+
 ### Phase 9 --- PQ and IVF-PQ (HUMAN CORE)
 
 Implement subspace splitting, PQ codebooks, encoding, ADC

@@ -168,6 +168,10 @@ class IVFFlatIndex:
         Maximum k-means iterations for centroid training.
     tol : float, default=1e-4
         Convergence tolerance for k-means centroid training.
+    distance_method : {"blas", "reference"}, default="blas"
+        Distance computation kernel used for coarse centroid assignment and candidate
+        scoring. "blas" uses optimized matrix multiplication; "reference" uses
+        `pairwise_squared_l2_ref` for direct coordinate differences.
     """
 
     def __init__(
@@ -180,13 +184,17 @@ class IVFFlatIndex:
         seed: int | np.random.Generator | None = 42,
         max_iter: int = 100,
         tol: float = 1e-4,
+        distance_method: str = "blas",
     ) -> None:
         N, d, valid_ids = _validate_ivf_build_inputs(database, nlist, ids, nprobe)
+        if distance_method not in ("blas", "reference"):
+            raise ValueError(f"distance_method must be 'blas' or 'reference', got {distance_method!r}")
 
         self._d = d
         self._ntotal = N
         self._nlist = nlist
         self._nprobe = nprobe
+        self._distance_method = distance_method
 
         # 1. Coarse Centroids: train via Phase 4 kmeans or validate pre-supplied codebook
         if centroids is None:
@@ -318,6 +326,11 @@ class IVFFlatIndex:
             return 0.0
         return float(self.index_memory_bytes / self._ntotal)
 
+    @property
+    def distance_method(self) -> str:
+        """Distance computation kernel used by this index ('blas' or 'reference')."""
+        return self._distance_method
+
     def _search_single(
         self,
         query: np.ndarray,
@@ -325,9 +338,11 @@ class IVFFlatIndex:
         eff_nprobe: int,
     ) -> SearchResult:
         """Search nearest neighbors for a single query vector of shape `(d,)`."""
+        dist_fn = pairwise_squared_l2_blas if self._distance_method == "blas" else pairwise_squared_l2_ref
+
         # 1. Rank coarse centroids by distance to query
         # Shape: (nlist,)
-        centroid_dists = pairwise_squared_l2_ref(query, self._centroids)
+        centroid_dists = dist_fn(query, self._centroids)
 
         # Stable sort guarantees that equidistant centroids break ties by lowest centroid index
         probed_centroids = np.argsort(centroid_dists, kind="stable")[:eff_nprobe]
@@ -352,14 +367,19 @@ class IVFFlatIndex:
                 candidate_distance_computations=0,
             )
 
-        # 4. Concatenate candidate buffers
-        cand_vecs = np.concatenate(cand_vec_list, axis=0)
-        cand_ids = np.concatenate(cand_id_list, axis=0)
+        # 4. Concatenate candidate buffers (avoid unnecessary allocation if single list probed)
+        if len(cand_vec_list) == 1:
+            cand_vecs = cand_vec_list[0]
+            cand_ids = cand_id_list[0]
+        else:
+            cand_vecs = np.concatenate(cand_vec_list, axis=0)
+            cand_ids = np.concatenate(cand_id_list, axis=0)
+
         if not cand_vecs.flags.c_contiguous:
             cand_vecs = np.ascontiguousarray(cand_vecs)
 
         # 5. Exact distance calculation against candidate vectors
-        cand_dists = pairwise_squared_l2_ref(query, cand_vecs)
+        cand_dists = dist_fn(query, cand_vecs)
 
         # 6. Top-k selection with deterministic (distance, ID) ordering
         res = select_top_k(cand_dists, cand_ids, k=k)
@@ -464,10 +484,66 @@ class IVFFlatIndex:
                 candidate_distance_computations=0,
             )
 
-        per_query_results = [
-            self._search_single(queries[i], k=k, eff_nprobe=eff_nprobe)
-            for i in range(num_queries)
-        ]
+        dist_fn = pairwise_squared_l2_blas if self._distance_method == "blas" else pairwise_squared_l2_ref
+
+        # 1. Coarse Quantization: compute coarse centroid distances for all queries
+        if self._distance_method == "blas":
+            all_centroid_dists = pairwise_squared_l2_blas(queries, self._centroids)
+        else:
+            all_centroid_dists = np.stack(
+                [pairwise_squared_l2_ref(queries[i], self._centroids) for i in range(num_queries)],
+                axis=0,
+            )
+
+        # Stable sort guarantees deterministic tie-breaking on equal centroid distances
+        all_probed = np.argsort(all_centroid_dists, axis=1, kind="stable")[:, :eff_nprobe]
+
+        per_query_results: list[SearchResult] = []
+        for i in range(num_queries):
+            probed_centroids = all_probed[i]
+            cand_vec_list = []
+            cand_id_list = []
+            for c in probed_centroids:
+                lst = self._invlists[c]
+                if lst.size > 0:
+                    cand_vec_list.append(lst.vectors)
+                    cand_id_list.append(lst.ids)
+
+            if not cand_vec_list:
+                per_query_results.append(
+                    SearchResult(
+                        distances=np.empty((0,), dtype=np.float32),
+                        ids=np.empty((0,), dtype=np.int64),
+                        mask=np.empty((0,), dtype=bool),
+                        distance_computations=self._nlist,
+                        centroid_distance_computations=self._nlist,
+                        candidate_distance_computations=0,
+                    )
+                )
+                continue
+
+            if len(cand_vec_list) == 1:
+                cand_vecs = cand_vec_list[0]
+                cand_ids = cand_id_list[0]
+            else:
+                cand_vecs = np.concatenate(cand_vec_list, axis=0)
+                cand_ids = np.concatenate(cand_id_list, axis=0)
+
+            if not cand_vecs.flags.c_contiguous:
+                cand_vecs = np.ascontiguousarray(cand_vecs)
+
+            cand_dists = dist_fn(queries[i], cand_vecs)
+            res = select_top_k(cand_dists, cand_ids, k=k)
+            per_query_results.append(
+                SearchResult(
+                    distances=res.distances,
+                    ids=res.ids,
+                    mask=res.mask,
+                    distance_computations=self._nlist + len(cand_ids),
+                    centroid_distance_computations=self._nlist,
+                    candidate_distance_computations=len(cand_ids),
+                )
+            )
 
         total_dc = sum(
             r.distance_computations for r in per_query_results if r.distance_computations is not None
@@ -514,6 +590,7 @@ def ivf_flat_build(
     seed: int | np.random.Generator | None = 42,
     max_iter: int = 100,
     tol: float = 1e-4,
+    distance_method: str = "blas",
 ) -> IVFFlatIndex:
     """Construct an IVFFlatIndex from database vectors."""
     return IVFFlatIndex(
@@ -525,6 +602,7 @@ def ivf_flat_build(
         seed=seed,
         max_iter=max_iter,
         tol=tol,
+        distance_method=distance_method,
     )
 
 
