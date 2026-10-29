@@ -184,6 +184,10 @@ tiny synthetic smoke test."
 **Gate:** documented command creates results and plots; smoke test
 works. Tag v0.1 only after the gate passes.
 
+*Status: Complete & Released.* Phase 6 and 6.5 acceptance gates passed.
+Verified with 146 passing tests and full SIFT-100k real-data evaluation (N=100,000, Q=1,000, d=128).
+Annotated release tag `v0.1` published with attached benchmark manifest, CSV summary, and trade-off plots.
+
 ### Phase 7 --- Reference adapters (AGENT-ASSISTED)
 
 Add optional adapters for suitable libraries such as FAISS or hnswlib.

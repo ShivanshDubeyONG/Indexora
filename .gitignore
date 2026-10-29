@@ -42,6 +42,11 @@ results/
 
 # Datasets and local array caches
 data/
+sift/
+*.fvecs
+*.ivecs
+*.bvecs
+*.tar.gz
 *.npy
 *.npz
 
