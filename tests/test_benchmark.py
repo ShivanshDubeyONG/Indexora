@@ -279,6 +279,26 @@ def test_benchmark_cli_smoke(tmp_path: Path):
     assert (Path(out_dir) / "benchmark_summary.csv").exists()
 
 
+def test_benchmark_cli_smoke_with_hnsw(tmp_path: Path):
+    """Verify CLI --smoke flag with --hnsw runs end-to-end and outputs HNSW results."""
+    import json
+
+    out_dir = str(tmp_path / "cli_smoke_hnsw")
+    ret_code = main(["--smoke", "--hnsw", "--no-plot", "--output-dir", out_dir, "--seed", "42"])
+    assert ret_code == 0
+
+    res_file = Path(out_dir) / "benchmark_results.json"
+    assert res_file.exists()
+    data = json.loads(res_file.read_text(encoding="utf-8"))
+    index_names = [run["index_name"] for run in data["runs"]]
+    assert "hnsw" in index_names
+    hnsw_runs = [run for run in data["runs"] if run["index_name"] == "hnsw"]
+    assert len(hnsw_runs) == 2
+    for r in hnsw_runs:
+        assert r["recall_at_k"] >= 0.95
+        assert r["distance_computations_per_query"] < 200.0  # Graph navigation evaluates subset
+
+
 # ============================================================================
 # 6. Advanced Edge Cases & Reproducibility
 # ============================================================================

@@ -39,6 +39,7 @@ from indexora.data import (
 )
 from indexora.eval import compute_distance_aware_recall_at_k, compute_recall_at_k
 from indexora.exact import ExactBlasIndex, ExactFlatIndex, generate_ground_truth
+from indexora.hnsw import HNSWIndex
 from indexora.ivf import IVFFlatIndex
 from indexora.ivfpq import IVFPQIndex
 
@@ -64,6 +65,10 @@ class BenchmarkConfig:
     include_ivf_pq: bool = False
     ivf_pq_m: int = 8
     ivf_pq_k_sub: int = 256
+    include_hnsw: bool = False
+    hnsw_m: int = 16
+    hnsw_ef_construction: int = 64
+    hnsw_ef_search_values: tuple[int, ...] = (16, 32, 64, 128)
 
     def __post_init__(self) -> None:
         if self.k <= 0:
@@ -327,6 +332,7 @@ class BenchmarkResult:
         faiss_flat_runs = [r for r in self.runs if r.index_name == "faiss_flat"]
         faiss_ivf_runs = [r for r in self.runs if r.index_name == "faiss_ivf_flat"]
         hnsw_runs = [r for r in self.runs if r.index_name == "hnswlib"]
+        custom_hnsw_runs = [r for r in self.runs if r.index_name == "hnsw"]
         ivf_runs = [r for r in self.runs if r.index_name == "ivf_flat"]
         ivf_pq_runs = [r for r in self.runs if r.index_name == "ivf_pq"]
 
@@ -425,6 +431,17 @@ class BenchmarkResult:
                 ef = run.parameters.get("ef_search", "")
                 ax.annotate(f"ef={ef}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
 
+        if custom_hnsw_runs:
+            custom_hnsw_sorted = sorted(custom_hnsw_runs, key=lambda x: int(x.parameters.get("ef_search", 0)))
+            lats = [x.per_query_p50_ms for x in custom_hnsw_sorted]
+            recs = [x.recall_at_k for x in custom_hnsw_sorted]
+            m_val = custom_hnsw_sorted[0].parameters.get("M", "")
+            ef_c = custom_hnsw_sorted[0].parameters.get("ef_construction", "")
+            ax.plot(lats, recs, marker="d", linestyle="-", color="#008080", label=f"HNSW (M={m_val}, ef_c={ef_c})")
+            for x, y, run in zip(lats, recs, custom_hnsw_sorted):
+                ef = run.parameters.get("ef_search", "")
+                ax.annotate(f"ef={ef}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
+
         ax.set_title(f"Recall@{k_val} vs. Per-Query p50 Latency\n{ds_name} (N={n_base:,}, d={d_dim})")
         ax.set_xlabel("p50 Individual Query Latency (ms)")
         ax.set_ylabel(f"Recall@{k_val}")
@@ -494,6 +511,17 @@ class BenchmarkResult:
                 label=f"FAISS Flat (N={int(ff.distance_computations_per_query):,})",
                 zorder=5,
             )
+
+        if custom_hnsw_runs:
+            custom_hnsw_sorted = sorted(custom_hnsw_runs, key=lambda x: int(x.parameters.get("ef_search", 0)))
+            dcs = [x.distance_computations_per_query for x in custom_hnsw_sorted]
+            recs = [x.recall_at_k for x in custom_hnsw_sorted]
+            m_val = custom_hnsw_sorted[0].parameters.get("M", "")
+            ef_c = custom_hnsw_sorted[0].parameters.get("ef_construction", "")
+            ax.plot(dcs, recs, marker="d", linestyle="-", color="#008080", label=f"HNSW (M={m_val}, ef_c={ef_c})")
+            for x, y, run in zip(dcs, recs, custom_hnsw_sorted):
+                ef = run.parameters.get("ef_search", "")
+                ax.annotate(f"ef={ef}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
 
         ax.set_title(f"Recall@{k_val} vs. Distance Computations / Query\n{ds_name} (N={n_base:,}, d={d_dim})")
         ax.set_xlabel("Actual Distance Computations per Query")
@@ -1101,7 +1129,103 @@ def run_benchmark(
                         f"Mem={ivf_pq_index.index_memory_mib:.2f}MB ({ivf_pq_index.compression_ratio:.1f}x compression)"
                     )
 
-    # 5. Reference Library Comparison Adapters (Phase 7)
+    # 5. HNSW Sweeps (Phase 10)
+    if config.include_hnsw:
+        if verbose:
+            print("\n[5/5] Benchmarking Custom HNSW Parameter Sweeps...")
+            print(f"  Building HNSW (M={config.hnsw_m}, ef_construction={config.hnsw_ef_construction})...")
+
+        tracemalloc.start()
+        t0_hnsw_b = time.perf_counter()
+        hnsw_index = HNSWIndex(
+            database=dataset.base,
+            M=config.hnsw_m,
+            ef_construction=config.hnsw_ef_construction,
+            ids=dataset.base_ids,
+            random_seed=config.seed,
+        )
+        hnsw_build_time = time.perf_counter() - t0_hnsw_b
+        _, hnsw_build_mem = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        if verbose:
+            print(
+                f"  HNSW built in {hnsw_build_time:.2f}s | "
+                f"MaxLevel={hnsw_index.max_level} | "
+                f"Edges={hnsw_index.graph_edge_count:,} | "
+                f"Memory={hnsw_index.index_memory_mib:.2f}MiB ({hnsw_index.bytes_per_vector:.1f} B/vec)"
+            )
+
+        for ef_s in config.hnsw_ef_search_values:
+            lats, p50, p95, p99, mean_l, std_l, min_l, max_l, sample_count = _measure_per_query_latency(
+                search_single_fn=lambda q, k: hnsw_index.search(q, k=k, ef_search=ef_s),
+                queries_subset=queries_latency_sample,
+                k=config.k,
+                warmup_runs=config.warmup_runs,
+            )
+
+            batch_qps, batch_mean_ms = _measure_batch_throughput(
+                search_batch_fn=lambda q, k: hnsw_index.search(q, k=k, ef_search=ef_s),
+                queries=dataset.queries,
+                k=config.k,
+                warmup_runs=config.warmup_runs,
+                repeat_runs=config.repeat_runs,
+            )
+
+            hnsw_eval_res = hnsw_index.search(dataset.queries, k=config.k, ef_search=ef_s)
+            recall = compute_recall_at_k(hnsw_eval_res, gt_result, k=config.k)
+            dist_aware_rec = compute_distance_aware_recall_at_k(hnsw_eval_res, gt_result, k=config.k)
+
+            hnsw_total_dc = int(hnsw_eval_res.distance_computations) if hnsw_eval_res.distance_computations is not None else 0
+            hnsw_dc = float(hnsw_total_dc / Q) if Q > 0 else 0.0
+            peak_rss_hnsw = get_process_peak_rss_bytes()
+
+            run_hnsw = RunMetrics(
+                index_name="hnsw",
+                parameters={
+                    "M": config.hnsw_m,
+                    "ef_construction": config.hnsw_ef_construction,
+                    "ef_search": ef_s,
+                    "edges": hnsw_index.graph_edge_count,
+                    "max_level": hnsw_index.max_level,
+                },
+                build_time_seconds=hnsw_build_time,
+                build_peak_tracemalloc_bytes=hnsw_build_mem,
+                index_memory_bytes=hnsw_index.index_memory_bytes,
+                index_memory_mib=hnsw_index.index_memory_mib,
+                bytes_per_vector=hnsw_index.bytes_per_vector,
+                per_query_latencies_ms=lats,
+                per_query_p50_ms=p50,
+                per_query_p95_ms=p95,
+                per_query_p99_ms=p99,
+                per_query_mean_ms=mean_l,
+                per_query_min_ms=min_l,
+                per_query_max_ms=max_l,
+                per_query_sample_count=sample_count,
+                batch_qps=batch_qps,
+                batch_mean_latency_ms=batch_mean_ms,
+                batch_repeat_runs=config.repeat_runs,
+                recall_at_k=recall,
+                distance_computations_per_query=hnsw_dc,
+                per_query_std_ms=std_l,
+                distance_aware_recall_at_k=dist_aware_rec,
+                peak_process_rss_bytes=peak_rss_hnsw,
+                total_distance_computations=hnsw_total_dc,
+                total_centroid_distance_computations=0,
+                total_candidate_distance_computations=hnsw_total_dc,
+                centroid_distance_computations_per_query=0.0,
+                candidate_distance_computations_per_query=hnsw_dc,
+            )
+            result.runs.append(run_hnsw)
+
+            if verbose:
+                print(
+                    f"    HNSW ef_search={ef_s:<3d} -> Recall@{config.k}={recall:.4f} (DistRec={dist_aware_rec:.4f}) | "
+                    f"p50={p50:6.2f}ms (std={std_l:5.2f}ms) | QPS={batch_qps:7.1f} | "
+                    f"DC/Q={hnsw_dc:6.0f}"
+                )
+
+    # 6. Reference Library Comparison Adapters (Phase 7)
     if config.compare_faiss:
         from indexora.adapters import FaissFlatIndex, FaissIVFFlatIndex, is_faiss_available
 
@@ -1388,11 +1512,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--pq-m", type=int, default=8, help="Number of subspaces M for IVF-PQ")
     parser.add_argument("--pq-ksub", type=int, default=256, help="Centroids per subspace k_sub for IVF-PQ")
+    parser.add_argument(
+        "--hnsw",
+        action="store_true",
+        help="Include custom HNSW index sweep in benchmark",
+    )
+    parser.add_argument("--hnsw-m", type=int, default=16, help="Connectivity M for HNSW")
+    parser.add_argument(
+        "--hnsw-ef-construction",
+        type=int,
+        default=64,
+        help="ef_construction exploration depth for HNSW build",
+    )
+    parser.add_argument(
+        "--hnsw-ef-search",
+        type=str,
+        default="16,32,64,128",
+        help="Comma-separated ef_search values for HNSW search",
+    )
     parser.add_argument("--no-plot", action="store_true", help="Skip generating plot images")
 
     args = parser.parse_args(argv)
 
     extra_metadata: dict[str, Any] = {}
+    hnsw_ef_search_vals = tuple(int(x.strip()) for x in args.hnsw_ef_search.split(",") if x.strip())
 
     if args.smoke:
         # Fast smoke configuration: N=200, Q=20, d=8, nlist=5, nprobe=[1, 5]
@@ -1419,6 +1562,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             include_ivf_pq=args.ivf_pq,
             ivf_pq_m=args.pq_m,
             ivf_pq_k_sub=args.pq_ksub,
+            include_hnsw=args.hnsw,
+            hnsw_m=4,
+            hnsw_ef_construction=16,
+            hnsw_ef_search_values=(8, 16),
         )
         dataset_name = "Synthetic Smoke Clustered"
     elif args.dataset == "sift_fvecs":
@@ -1469,6 +1616,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             include_ivf_pq=args.ivf_pq,
             ivf_pq_m=args.pq_m,
             ivf_pq_k_sub=args.pq_ksub,
+            include_hnsw=args.hnsw,
+            hnsw_m=args.hnsw_m,
+            hnsw_ef_construction=args.hnsw_ef_construction,
+            hnsw_ef_search_values=hnsw_ef_search_vals,
         )
         dataset_name = f"SIFT-{n_base_req // 1000}k Subset"
     else:
@@ -1501,6 +1652,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             include_ivf_pq=args.ivf_pq,
             ivf_pq_m=args.pq_m,
             ivf_pq_k_sub=args.pq_ksub,
+            include_hnsw=args.hnsw,
+            hnsw_m=args.hnsw_m,
+            hnsw_ef_construction=args.hnsw_ef_construction,
+            hnsw_ef_search_values=hnsw_ef_search_vals,
         )
         dataset_name = f"Synthetic Clustered (N={args.n_base:,})"
 

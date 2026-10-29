@@ -22,6 +22,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 7 (Reference Adapters):** Complete. Added optional adapters (`FaissFlatIndex`, `FaissIVFFlatIndex`, `HnswlibIndex`) with normalized `SearchResult` containers, squared L2 distance contracts, arbitrary `int64` ID mapping (including negative IDs), memory accounting, and optional dependency isolation.
 - **Phase 8 (Profiling & Acceleration):** Complete. Targeted profiling identified distance calculation as the primary IVF-Flat bottleneck (83.0% of search time). Accelerated search via batched coarse quantization, BLAS candidate distance scoring, and zero-copy candidate handling, delivering a **1.56x to 2.62x latency speedup** and up to **2.62x higher throughput** while preserving exact ID tie-breaking and reference oracle mode.
 - **Phase 9 (Product Quantization & IVF-PQ):** Complete. Added `ProductQuantizer` and `IVFPQIndex` with subspace decomposition ($d = M \times d_{\text{sub}}$), compact quantization codes (`uint8`/`uint16`), coarse-centroid residual encoding, and Asymmetric Distance Computation (ADC) lookup table candidate scoring. Demonstrated **15.2x memory compression** (reducing index footprint from 5.01 MB to 0.33 MB for $N=10,000, d=128$) while maintaining full compatibility with Indexora's ID and search result contracts.
+- **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** while evaluating only ~15% of database distances.
 
 ## Project Conventions
 
@@ -188,6 +189,26 @@ Indexora supports compact vector quantization and compressed inverted-file searc
 ```bash
 # Run synthetic benchmark including IVF-PQ sweep
 python -m indexora.benchmark --ivf-pq --pq-m 8 --pq-ksub 256
+```
+
+## Custom HNSW Index (Phase 10)
+
+Indexora includes a from-scratch implementation of Hierarchical Navigable Small World graphs (`src/indexora/hnsw.py`):
+- **`HNSWIndex`:** Multi-layer proximity graph supporting fast logarithmic greedy routing on upper layers and fine-grained exploration on level 0. Built incrementally without external C++/C libraries.
+- **Layer Assignment:** Exponential decay distribution $l = \lfloor -\ln(\text{uniform}(0, 1)) \cdot m_L \rfloor$ with $m_L = 1 / \ln(M)$.
+- **Neighbor Selection Heuristic (Algorithm 4):** Evaluates spatial diversity to prune redundant edges along identical lines-of-sight, maintaining navigable small-world connectivity across clusters.
+- **Degree Bounds & Edge Accounting:** Strict adherence to $M_0 = 2M$ maximum degree at layer 0 and $M$ at layers $> 0$.
+- **Exact Contract Parity:** Returns frozen `SearchResult(distances, ids, mask)` with deterministic ascending `(distance, external_id)` tie-breaking and exact distance evaluation counts.
+- **Memory Tracking:** Reports `.vector_memory_bytes`, `.id_memory_bytes`, `.graph_edge_count`, `.graph_memory_bytes`, `.index_memory_bytes`, and `.bytes_per_vector`.
+
+### Benchmarking HNSW
+
+```bash
+# Fast smoke benchmark with HNSW
+python -m indexora.benchmark --smoke --hnsw --no-plot
+
+# Parameter sweep over connectivity M and exploration depths
+python -m indexora.benchmark --n-base 1000 --n-queries 50 --hnsw --hnsw-m 16 --hnsw-ef-construction 64 --hnsw-ef-search 16,32,64
 ```
 
 ## Documentation

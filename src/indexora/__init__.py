@@ -26,6 +26,11 @@ from indexora.exact import (
     exact_search_blas,
     generate_ground_truth,
 )
+from indexora.hnsw import (
+    HNSWIndex,
+    hnsw_build,
+    hnsw_search,
+)
 from indexora.ivf import (
     InvertedList,
     IVFFlatIndex,
@@ -74,6 +79,9 @@ __all__ = [
     "ivf_flat_build",
     "ivf_flat_search",
     "ProductQuantizer",
+    "HNSWIndex",
+    "hnsw_build",
+    "hnsw_search",
     "InvertedPQList",
     "IVFPQIndex",
     "ivf_pq_build",
