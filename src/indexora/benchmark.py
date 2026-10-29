@@ -40,6 +40,7 @@ from indexora.data import (
 from indexora.eval import compute_distance_aware_recall_at_k, compute_recall_at_k
 from indexora.exact import ExactBlasIndex, ExactFlatIndex, generate_ground_truth
 from indexora.ivf import IVFFlatIndex
+from indexora.ivfpq import IVFPQIndex
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,9 @@ class BenchmarkConfig:
     query_path: str | None = None
     compare_faiss: bool = False
     compare_hnswlib: bool = False
+    include_ivf_pq: bool = False
+    ivf_pq_m: int = 8
+    ivf_pq_k_sub: int = 256
 
     def __post_init__(self) -> None:
         if self.k <= 0:
@@ -324,11 +328,17 @@ class BenchmarkResult:
         faiss_ivf_runs = [r for r in self.runs if r.index_name == "faiss_ivf_flat"]
         hnsw_runs = [r for r in self.runs if r.index_name == "hnswlib"]
         ivf_runs = [r for r in self.runs if r.index_name == "ivf_flat"]
+        ivf_pq_runs = [r for r in self.runs if r.index_name == "ivf_pq"]
 
         nlist_groups: dict[int, list[RunMetrics]] = {}
         for r in ivf_runs:
             nl = int(r.parameters.get("nlist", 0))
             nlist_groups.setdefault(nl, []).append(r)
+
+        pq_nlist_groups: dict[int, list[RunMetrics]] = {}
+        for r in ivf_pq_runs:
+            nl = int(r.parameters.get("nlist", 0))
+            pq_nlist_groups.setdefault(nl, []).append(r)
 
         ds_name = self.dataset_metadata.get("name", "Dataset")
         n_base = self.dataset_metadata.get("n_base", 0)
@@ -345,6 +355,16 @@ class BenchmarkResult:
             for x, y, run in zip(latencies, recalls, group_sorted):
                 p = run.parameters.get("nprobe", "")
                 ax.annotate(f"p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
+
+        for nl, group in sorted(pq_nlist_groups.items()):
+            group_sorted = sorted(group, key=lambda x: int(x.parameters.get("nprobe", 0)))
+            latencies = [x.per_query_p50_ms for x in group_sorted]
+            recalls = [x.recall_at_k for x in group_sorted]
+            m_val = group_sorted[0].parameters.get("M", "")
+            ax.plot(latencies, recalls, marker="^", linestyle="-.", label=f"IVF-PQ (M={m_val}, nlist={nl})")
+            for x, y, run in zip(latencies, recalls, group_sorted):
+                p = run.parameters.get("nprobe", "")
+                ax.annotate(f"pq p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
 
         if exact_ref_runs:
             ex = exact_ref_runs[0]
@@ -428,6 +448,16 @@ class BenchmarkResult:
             for x, y, run in zip(dcs, recalls, group_sorted):
                 p = run.parameters.get("nprobe", "")
                 ax.annotate(f"p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
+
+        for nl, group in sorted(pq_nlist_groups.items()):
+            group_sorted = sorted(group, key=lambda x: int(x.parameters.get("nprobe", 0)))
+            dcs = [x.distance_computations_per_query for x in group_sorted]
+            recalls = [x.recall_at_k for x in group_sorted]
+            m_val = group_sorted[0].parameters.get("M", "")
+            ax.plot(dcs, recalls, marker="^", linestyle="-.", label=f"IVF-PQ (M={m_val}, nlist={nl})")
+            for x, y, run in zip(dcs, recalls, group_sorted):
+                p = run.parameters.get("nprobe", "")
+                ax.annotate(f"pq p={p}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
 
         if exact_ref_runs:
             ex = exact_ref_runs[0]
@@ -956,7 +986,122 @@ def run_benchmark(
                     f"DC/Q={ivf_dc:6.0f} (Cent={ivf_centroid_dc:4.0f}, Cand={ivf_cand_dc:4.0f})"
                 )
 
-    # 4. Reference Library Comparison Adapters (Phase 7)
+    # 4. IVF-PQ Sweeps (Phase 9)
+    if config.include_ivf_pq:
+        if verbose:
+            print("\n[5/5] Benchmarking IVF-PQ Parameter Sweeps...")
+
+        d_val = dataset.base.shape[1]
+        target_m = config.ivf_pq_m
+        if d_val % target_m != 0:
+            divisors = [m for m in range(1, target_m + 1) if d_val % m == 0]
+            pq_m = max(divisors) if divisors else 1
+        else:
+            pq_m = target_m
+
+        pq_k_sub = min(config.ivf_pq_k_sub, max(4, N // 2))
+
+        for nlist in config.nlist_values:
+            if nlist > N:
+                continue
+
+            if verbose:
+                print(f"  Building IVF-PQ (nlist={nlist}, M={pq_m}, k_sub={pq_k_sub})...")
+
+            tracemalloc.start()
+            t0_pq_b = time.perf_counter()
+            ivf_pq_index = IVFPQIndex(
+                database=dataset.base,
+                nlist=nlist,
+                M=pq_m,
+                k_sub=pq_k_sub,
+                ids=dataset.base_ids,
+                seed=config.seed,
+            )
+            pq_build_time = time.perf_counter() - t0_pq_b
+            _, pq_build_mem = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+
+            for nprobe in config.nprobe_values:
+                if nprobe > nlist:
+                    continue
+
+                lats, p50, p95, p99, mean_l, std_l, min_l, max_l, sample_count = _measure_per_query_latency(
+                    search_single_fn=lambda q, k: ivf_pq_index.search(q, k=k, nprobe=nprobe),
+                    queries_subset=queries_latency_sample,
+                    k=config.k,
+                    warmup_runs=config.warmup_runs,
+                )
+
+                batch_qps, batch_mean_ms = _measure_batch_throughput(
+                    search_batch_fn=lambda q, k: ivf_pq_index.search(q, k=k, nprobe=nprobe),
+                    queries=dataset.queries,
+                    k=config.k,
+                    warmup_runs=config.warmup_runs,
+                    repeat_runs=config.repeat_runs,
+                )
+
+                pq_eval_res = ivf_pq_index.search(dataset.queries, k=config.k, nprobe=nprobe)
+                recall = compute_recall_at_k(pq_eval_res, gt_result, k=config.k)
+                dist_aware_rec = compute_distance_aware_recall_at_k(pq_eval_res, gt_result, k=config.k)
+
+                pq_total_dc = int(pq_eval_res.distance_computations) if pq_eval_res.distance_computations is not None else 0
+                pq_total_centroid_dc = int(pq_eval_res.centroid_distance_computations) if pq_eval_res.centroid_distance_computations is not None else 0
+                pq_total_cand_dc = int(pq_eval_res.candidate_distance_computations) if pq_eval_res.candidate_distance_computations is not None else 0
+                pq_dc = float(pq_total_dc / Q) if Q > 0 else 0.0
+                pq_centroid_dc = float(pq_total_centroid_dc / Q) if Q > 0 else 0.0
+                pq_cand_dc = float(pq_total_cand_dc / Q) if Q > 0 else 0.0
+                peak_rss_pq = get_process_peak_rss_bytes()
+
+                run_pq = RunMetrics(
+                    index_name="ivf_pq",
+                    parameters={
+                        "nlist": nlist,
+                        "nprobe": nprobe,
+                        "M": pq_m,
+                        "k_sub": pq_k_sub,
+                        "compression": f"{ivf_pq_index.compression_ratio:.1f}x",
+                    },
+                    build_time_seconds=pq_build_time,
+                    build_peak_tracemalloc_bytes=pq_build_mem,
+                    index_memory_bytes=ivf_pq_index.index_memory_bytes,
+                    index_memory_mib=ivf_pq_index.index_memory_mib,
+                    bytes_per_vector=ivf_pq_index.bytes_per_vector,
+                    per_query_latencies_ms=lats,
+                    per_query_p50_ms=p50,
+                    per_query_p95_ms=p95,
+                    per_query_p99_ms=p99,
+                    per_query_mean_ms=mean_l,
+                    per_query_min_ms=min_l,
+                    per_query_max_ms=max_l,
+                    per_query_sample_count=sample_count,
+                    batch_qps=batch_qps,
+                    batch_mean_latency_ms=batch_mean_ms,
+                    batch_repeat_runs=config.repeat_runs,
+                    recall_at_k=recall,
+                    distance_computations_per_query=pq_dc,
+                    per_query_std_ms=std_l,
+                    distance_aware_recall_at_k=dist_aware_rec,
+                    kmeans_n_iter=ivf_pq_index.kmeans_n_iter,
+                    kmeans_converged=ivf_pq_index.kmeans_converged,
+                    kmeans_inertia=ivf_pq_index.kmeans_inertia,
+                    peak_process_rss_bytes=peak_rss_pq,
+                    total_distance_computations=pq_total_dc,
+                    total_centroid_distance_computations=pq_total_centroid_dc,
+                    total_candidate_distance_computations=pq_total_cand_dc,
+                    centroid_distance_computations_per_query=pq_centroid_dc,
+                    candidate_distance_computations_per_query=pq_cand_dc,
+                )
+                result.runs.append(run_pq)
+
+                if verbose:
+                    print(
+                        f"    IVF-PQ nprobe={nprobe:<3d} -> Recall@{config.k}={recall:.4f} (DistRec={dist_aware_rec:.4f}) | "
+                        f"p50={p50:6.2f}ms (std={std_l:5.2f}ms) | QPS={batch_qps:7.1f} | "
+                        f"Mem={ivf_pq_index.index_memory_mib:.2f}MB ({ivf_pq_index.compression_ratio:.1f}x compression)"
+                    )
+
+    # 5. Reference Library Comparison Adapters (Phase 7)
     if config.compare_faiss:
         from indexora.adapters import FaissFlatIndex, FaissIVFFlatIndex, is_faiss_available
 
@@ -1236,6 +1381,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Include hnswlib baseline if hnswlib is installed",
     )
+    parser.add_argument(
+        "--ivf-pq",
+        action="store_true",
+        help="Include IVF-PQ index sweep in benchmark",
+    )
+    parser.add_argument("--pq-m", type=int, default=8, help="Number of subspaces M for IVF-PQ")
+    parser.add_argument("--pq-ksub", type=int, default=256, help="Centroids per subspace k_sub for IVF-PQ")
     parser.add_argument("--no-plot", action="store_true", help="Skip generating plot images")
 
     args = parser.parse_args(argv)
@@ -1264,6 +1416,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_type="synthetic",
             compare_faiss=args.compare_faiss,
             compare_hnswlib=args.compare_hnswlib,
+            include_ivf_pq=args.ivf_pq,
+            ivf_pq_m=args.pq_m,
+            ivf_pq_k_sub=args.pq_ksub,
         )
         dataset_name = "Synthetic Smoke Clustered"
     elif args.dataset == "sift_fvecs":
@@ -1311,6 +1466,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             query_path=args.query_path,
             compare_faiss=args.compare_faiss,
             compare_hnswlib=args.compare_hnswlib,
+            include_ivf_pq=args.ivf_pq,
+            ivf_pq_m=args.pq_m,
+            ivf_pq_k_sub=args.pq_ksub,
         )
         dataset_name = f"SIFT-{n_base_req // 1000}k Subset"
     else:
@@ -1340,6 +1498,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_type="synthetic",
             compare_faiss=args.compare_faiss,
             compare_hnswlib=args.compare_hnswlib,
+            include_ivf_pq=args.ivf_pq,
+            ivf_pq_m=args.pq_m,
+            ivf_pq_k_sub=args.pq_ksub,
         )
         dataset_name = f"Synthetic Clustered (N={args.n_base:,})"
 

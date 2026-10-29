@@ -32,7 +32,14 @@ from indexora.ivf import (
     ivf_flat_build,
     ivf_flat_search,
 )
+from indexora.ivfpq import (
+    InvertedPQList,
+    IVFPQIndex,
+    ivf_pq_build,
+    ivf_pq_search,
+)
 from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
+from indexora.pq import ProductQuantizer
 from indexora.topk import SearchResult, select_top_k
 
 __version__ = "0.1.0.dev0"
@@ -66,6 +73,11 @@ __all__ = [
     "IVFFlatIndex",
     "ivf_flat_build",
     "ivf_flat_search",
+    "ProductQuantizer",
+    "InvertedPQList",
+    "IVFPQIndex",
+    "ivf_pq_build",
+    "ivf_pq_search",
     "compute_recall_at_k",
     "compute_distance_aware_recall_at_k",
     "count_distance_computations",

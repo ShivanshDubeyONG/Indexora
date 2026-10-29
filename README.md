@@ -21,6 +21,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 6.6 (Performance Baseline & Benchmark Credibility):** Complete. Added fast BLAS-accelerated exact search (`ExactBlasIndex`, `exact_search_blas`, `pairwise_squared_l2_blas`) leveraging $\|x-y\|^2 = \|x\|^2 + \|y\|^2 - 2(x \cdot y)$ while preserving the coordinate-difference reference kernel as the correctness oracle; accelerated K-means centroid assignment; bounded query batch memory via `max_query_chunk=1024`; added distance-aware Recall@k (`compute_distance_aware_recall_at_k`) to resolve boundary equidistant ties; exposed K-means convergence diagnostics (`kmeans_n_iter`, `kmeans_converged`, `kmeans_inertia`); tracked peak process RSS memory; and updated benchmark manifests, CSVs, and dual-baseline plots.
 - **Phase 7 (Reference Adapters):** Complete. Added optional adapters (`FaissFlatIndex`, `FaissIVFFlatIndex`, `HnswlibIndex`) with normalized `SearchResult` containers, squared L2 distance contracts, arbitrary `int64` ID mapping (including negative IDs), memory accounting, and optional dependency isolation.
 - **Phase 8 (Profiling & Acceleration):** Complete. Targeted profiling identified distance calculation as the primary IVF-Flat bottleneck (83.0% of search time). Accelerated search via batched coarse quantization, BLAS candidate distance scoring, and zero-copy candidate handling, delivering a **1.56x to 2.62x latency speedup** and up to **2.62x higher throughput** while preserving exact ID tie-breaking and reference oracle mode.
+- **Phase 9 (Product Quantization & IVF-PQ):** Complete. Added `ProductQuantizer` and `IVFPQIndex` with subspace decomposition ($d = M \times d_{\text{sub}}$), compact quantization codes (`uint8`/`uint16`), coarse-centroid residual encoding, and Asymmetric Distance Computation (ADC) lookup table candidate scoring. Demonstrated **15.2x memory compression** (reducing index footprint from 5.01 MB to 0.33 MB for $N=10,000, d=128$) while maintaining full compatibility with Indexora's ID and search result contracts.
 
 ## Project Conventions
 
@@ -172,6 +173,21 @@ python -m indexora.benchmark --compare-faiss
 
 # Run SIFT-100k benchmark with external reference comparisons
 python -m indexora.benchmark --dataset sift_fvecs --base-path sift/sift_base.fvecs --query-path sift/sift_query.fvecs --compare-faiss
+```
+
+## Product Quantization & IVF-PQ (Phase 9)
+
+Indexora supports compact vector quantization and compressed inverted-file search:
+- **`ProductQuantizer` (`src/indexora/pq.py`):** Decomposes $d$-dimensional space into $M$ orthogonal subspaces of dimension $d_{\text{sub}} = d / M$. Quantizes vectors into compact `uint8` (or `uint16`) codes.
+- **`IVFPQIndex` (`src/indexora/ivfpq.py`):** Combines coarse IVF Voronoi partitioning with subspace residual quantization ($r = x - c$). Posting lists store only discrete codes and `int64` IDs rather than raw vectors.
+- **Asymmetric Distance Computation (ADC):** Computes query-to-centroid distance tables $\text{LUT}[m, c]$; candidate distances accumulate in $\approx 50$ microseconds per 1,000 vectors without reconstructing full database vectors.
+- **Compression & Memory Accounting:** Tracks exact persistent array storage (`.coarse_centroid_memory_bytes`, `.codebook_memory_bytes`, `.codes_memory_bytes`, `.ids_memory_bytes`). Delivers **15.2× compression** ($N=10,000, d=128$: 0.33 MB vs 5.01 MB for IVF-Flat).
+
+### Benchmarking IVF-PQ
+
+```bash
+# Run synthetic benchmark including IVF-PQ sweep
+python -m indexora.benchmark --ivf-pq --pq-m 8 --pq-ksub 256
 ```
 
 ## Documentation
