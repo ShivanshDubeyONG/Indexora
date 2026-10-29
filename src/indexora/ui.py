@@ -887,7 +887,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    from streamlit.web import cli as stcli
+    import streamlit.runtime as st_runtime
 
-    sys.argv = ["streamlit", "run", __file__]
-    sys.exit(stcli.main())
+    if st_runtime.exists():
+        main()
+    else:
+        from streamlit.web import cli as stcli
+
+        sys.argv = ["streamlit", "run", __file__]
+        sys.exit(stcli.main())
