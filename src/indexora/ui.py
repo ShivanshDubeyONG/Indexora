@@ -44,55 +44,164 @@ from indexora.semantic import (
 
 
 def _apply_custom_styling() -> None:
-    """Inject clean developer-tool CSS styling into the Streamlit app."""
+    """Inject clean developer-tool CSS styling inspired by modern tech dashboards into Streamlit."""
     st.markdown(
         """
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
         <style>
+        /* Global Typography: Poppins for clean, modern readability */
+        html, body, [class*="css"], .stApp, p, span, div, label, li, .stMarkdown, .stSelectbox, .stSlider {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+            letter-spacing: -0.01em;
+        }
+
+        /* Headings: Montserrat for bold, geometric, tech-forward authority */
+        h1, h2, h3, h4, h5, h6, .main-header, [data-testid="stHeader"] {
+            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.025em !important;
+        }
+
         .main-header {
-            font-size: 2.2rem;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            margin-bottom: 0.2rem;
-            color: #1e293b;
+            font-family: 'Montserrat', sans-serif !important;
+            font-size: 2.25rem !important;
+            font-weight: 800 !important;
+            letter-spacing: -0.035em !important;
+            margin-bottom: 0.25rem !important;
+            line-height: 1.2 !important;
         }
         .sub-header {
-            font-size: 1.05rem;
-            color: #64748b;
-            margin-bottom: 1.5rem;
+            font-family: 'Poppins', sans-serif !important;
+            font-size: 0.98rem !important;
+            font-weight: 400 !important;
+            color: #64748b !important;
+            margin-bottom: 1.5rem !important;
         }
-        .metric-card {
-            background-color: #f8fafc;
+
+        /* Technical Monospace: JetBrains Mono for Code, Coordinates, Numbers, Distances */
+        code, pre, .font-mono, .stMetric [data-testid="stMetricValue"], [data-testid="stDataFrame"], .stCode, kbd {
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+        }
+
+        /* Metric Cards: Crisp, rounded borders with JetBrains Mono numbers */
+        [data-testid="stMetric"] {
+            background: rgba(248, 250, 252, 0.85);
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
+            padding: 0.75rem 1rem;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
-        .metric-title {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #64748b;
-            text-transform: uppercase;
+        [data-testid="stMetric"]:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
         }
-        .metric-value {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #0f172a;
+        [data-testid="stMetricLabel"] {
+            font-family: 'Poppins', sans-serif !important;
+            font-size: 0.75rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.04em !important;
+            color: #64748b !important;
         }
+        [data-testid="stMetricValue"] {
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 1.5rem !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em !important;
+            color: #0f172a !important;
+        }
+
+        /* Navigation Tabs: Montserrat font with subtle pills */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 2rem;
+            gap: 0.75rem;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 4px;
         }
         .stTabs [data-baseweb="tab"] {
-            font-size: 1.05rem;
-            font-weight: 600;
+            font-family: 'Montserrat', sans-serif !important;
+            font-size: 0.92rem !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.01em !important;
+            padding: 0.45rem 0.9rem !important;
+            border-radius: 6px !important;
+            color: #475569 !important;
+            transition: all 0.15s ease-in-out;
         }
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #0f172a !important;
+            background-color: #f1f5f9 !important;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #e0f2fe !important;
+            color: #0284c7 !important;
+        }
+
+        /* Buttons: Rounded with modern hover feel */
+        .stButton > button {
+            font-family: 'Poppins', sans-serif !important;
+            font-weight: 600 !important;
+            font-size: 0.9rem !important;
+            border-radius: 6px !important;
+            letter-spacing: -0.01em !important;
+            transition: all 0.15s ease;
+        }
+        .stButton > button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
+        }
+
+        /* Form Inputs & Selects */
+        .stTextInput input, .stSelectbox [data-baseweb="select"], .stNumberInput input {
+            font-family: 'Poppins', sans-serif !important;
+            border-radius: 6px !important;
+            font-size: 0.9rem !important;
+        }
+
+        /* Info & Callout Boxes */
         .callout-disclaimer {
-            background-color: #f1f5f9;
-            border-left: 4px solid #3b82f6;
+            background-color: #f8fafc;
+            border-left: 3px solid #0284c7;
             padding: 0.75rem 1rem;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
             color: #334155;
-            border-radius: 0 4px 4px 0;
+            border-radius: 0 6px 6px 0;
             margin-bottom: 1rem;
+        }
+
+        /* Dark mode compatibility */
+        @media (prefers-color-scheme: dark) {
+            .sub-header {
+                color: #94a3b8 !important;
+            }
+            [data-testid="stMetric"] {
+                background: rgba(30, 41, 59, 0.6) !important;
+                border-color: #334155 !important;
+            }
+            [data-testid="stMetricLabel"] {
+                color: #94a3b8 !important;
+            }
+            [data-testid="stMetricValue"] {
+                color: #f8fafc !important;
+            }
+            .stTabs [data-baseweb="tab"] {
+                color: #94a3b8 !important;
+            }
+            .stTabs [data-baseweb="tab"]:hover {
+                color: #f8fafc !important;
+                background-color: #1e293b !important;
+            }
+            .stTabs [aria-selected="true"] {
+                background-color: rgba(2, 132, 199, 0.2) !important;
+                color: #38bdf8 !important;
+            }
+            .callout-disclaimer {
+                background-color: #1e293b;
+                color: #cbd5e1;
+            }
         }
         </style>
         """,
