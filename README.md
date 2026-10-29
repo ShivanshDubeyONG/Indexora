@@ -23,6 +23,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 8 (Profiling & Acceleration):** Complete. Targeted profiling identified distance calculation as the primary IVF-Flat bottleneck (83.0% of search time). Accelerated search via batched coarse quantization, BLAS candidate distance scoring, and zero-copy candidate handling, delivering a **1.56x to 2.62x latency speedup** and up to **2.62x higher throughput** while preserving exact ID tie-breaking and reference oracle mode.
 - **Phase 9 (Product Quantization & IVF-PQ):** Complete. Added `ProductQuantizer` and `IVFPQIndex` with subspace decomposition ($d = M \times d_{\text{sub}}$), compact quantization codes (`uint8`/`uint16`), coarse-centroid residual encoding, and Asymmetric Distance Computation (ADC) lookup table candidate scoring. Demonstrated **15.2x memory compression** (reducing index footprint from 5.01 MB to 0.33 MB for $N=10,000, d=128$) while maintaining full compatibility with Indexora's ID and search result contracts.
 - **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** while evaluating only ~15% of database distances.
+- **Phase 11 (Mutations, Filtering & Persistence):** Complete. Implemented incremental additions (`add`), deletions (`delete`), filtered candidate search (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core index implementations. Features pickle-free `.npy` storage, SHA-256 manifest integrity verification, CSR graph serialization for HNSW without re-indexing, and codebook preservation for IVF-PQ without retraining.
 
 ## Project Conventions
 
@@ -210,6 +211,84 @@ python -m indexora.benchmark --smoke --hnsw --no-plot
 # Parameter sweep over connectivity M and exploration depths
 python -m indexora.benchmark --n-base 1000 --n-queries 50 --hnsw --hnsw-m 16 --hnsw-ef-construction 64 --hnsw-ef-search 16,32,64
 ```
+
+## Mutations, Filtered Search & Persistence (Phase 11)
+
+Indexora supports mutating vector collections, restricting search queries with arbitrary ID predicates, and safely serializing/deserializing indexes to disk.
+
+### Capability Matrix
+
+| Index Class | `add()` | `delete()` | `search(filter_ids=...)` | `save()` | `load()` | Deletion Semantics |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| `ExactFlatIndex` | ✅ | ✅ | ✅ | ✅ | ✅ | Exact array slice removal |
+| `ExactBlasIndex` | ✅ | ✅ | ✅ | ✅ | ✅ | Exact array slice removal |
+| `IVFFlatIndex` | ✅ | ✅ | ✅ | ✅ | ✅ | Inverted list vector removal |
+| `IVFPQIndex` | ✅ | ✅ | ✅ | ✅ | ✅ | Inverted list code removal |
+| `HNSWIndex` | ✅ | ✅ | ✅ | ✅ | ✅ | Navigable tombstone markers |
+| Reference Adapters | ❌ | ❌ | ❌ | ❌ | ❌ | Read-only benchmarking baselines |
+
+### 1. Vector Mutations (`add` & `delete`)
+
+Indexes can be updated incrementally without requiring a full rebuild:
+
+```python
+import numpy as np
+from indexora.hnsw import HNSWIndex
+
+# Build initial index
+vectors = np.random.randn(100, 16).astype(np.float32)
+ids = np.arange(100, dtype=np.int64)
+index = HNSWIndex(database=vectors, ids=ids)
+
+# Incrementally add new vectors with external IDs
+new_vecs = np.random.randn(5, 16).astype(np.float32)
+new_ids = np.array([101, 102, 103, 104, 105], dtype=np.int64)
+index.add(new_vecs, ids=new_ids)
+
+# Delete items by external ID
+index.delete([101, 102])
+assert len(index) == 103
+```
+
+- **ID Invariants:** All IDs are durable `int64` scalars (supporting zero, negative IDs, and non-sequential IDs). Duplicates and ID collisions raise explicit `ValueError`.
+- **HNSW Tombstones:** In HNSW, `delete()` applies tombstone markers (`_deleted_nodes`). Tombstoned vectors continue acting as navigable routing nodes in the graph hierarchy, preserving reachability without immediate expensive graph edge restructuring.
+
+### 2. Filtered Search (`filter_ids`)
+
+Queries can be restricted by passing caller-supplied eligibility filters:
+
+```python
+# Pass a set of allowed IDs
+res = index.search(query, k=5, filter_ids={1, 2, 3, 103})
+
+# Or pass a callable predicate
+res = index.search(query, k=5, filter_ids=lambda entity_id: entity_id > 50)
+```
+
+- **Supported Formats:** `filter_ids` accepts `set[int]`, `Sequence[int]`, NumPy `int64` arrays, or `Callable[[int], bool]`.
+- **Result Ordering:** Results maintain deterministic ascending order by `(distance, external_id)` among eligible vectors.
+- **Tombstone Guarantee:** A deleted vector will never appear in results, even if explicitly matched by the filter.
+
+### 3. Safe Atomic Persistence (`save` & `load`)
+
+Indexes can be saved to a directory and reloaded with zero Python pickle reliance:
+
+```python
+from indexora import save_index, load_index
+
+# Save index atomically to directory
+manifest = index.save("models/my_hnsw_index")
+
+# Load index back into memory with full checksum verification
+restored_index = load_index("models/my_hnsw_index", verify_checksums=True)
+```
+
+- **Zero-Pickle NumPy Storage:** Numerical arrays (`database.npy`, `centroids.npy`, `codebooks.npy`, graph CSR offsets/edges) are serialized using `np.save(allow_pickle=False)` to prevent security vulnerabilities.
+- **Atomic Directory Writes:** Saved into a temporary staging folder (`.tmp_<uuid>`) and atomically renamed upon successful completion.
+- **Manifest & Checksums:** `manifest.json` stores format identifier (`"indexora_index"`), schema version (`"1.0"`), hyperparameters, and SHA-256 checksums for each array file. Any tampered or corrupted array triggers an `IntegrityError` / `ValueError` upon loading.
+- **Zero Recomputation:**
+  - HNSW graphs are saved as Compact Sparse Row (CSR) representations and restored with bit-identical layer connectivity without graph re-indexing.
+  - IVF-PQ indexes restore coarse centroids, trained subspace codebooks, and discrete codes without retraining coarse k-means or codebooks.
 
 ## Documentation
 

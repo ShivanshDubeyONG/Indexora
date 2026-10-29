@@ -9,8 +9,10 @@ This module provides the Phase 9 IVF-PQ approximate nearest neighbor index:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Sequence
+from pathlib import Path
+from typing import Any, Sequence
 import numpy as np
 
 from indexora.clustering import kmeans
@@ -260,7 +262,7 @@ class IVFPQIndex:
                 lst_codes = np.empty((0, M), dtype=self._pq.code_dtype)
             invlists.append(InvertedPQList(ids=lst_ids, codes=lst_codes))
 
-        self._invlists = tuple(invlists)
+        self._invlists = list(invlists)
 
     @property
     def d(self) -> int:
@@ -270,6 +272,10 @@ class IVFPQIndex:
     @property
     def ntotal(self) -> int:
         """Total number of indexed vectors."""
+        return self._ntotal
+
+    def __len__(self) -> int:
+        """Return the number of indexed vectors."""
         return self._ntotal
 
     @property
@@ -326,7 +332,7 @@ class IVFPQIndex:
     @property
     def invlists(self) -> tuple[InvertedPQList, ...]:
         """Tuple of all inverted posting lists."""
-        return self._invlists
+        return tuple(self._invlists)
 
     @property
     def kmeans_n_iter(self) -> int | None:
@@ -422,6 +428,7 @@ class IVFPQIndex:
         query: np.ndarray,
         k: int,
         eff_nprobe: int,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search nearest neighbors for a single query vector of shape `(d,)`."""
         # 1. Rank coarse centroids
@@ -469,6 +476,27 @@ class IVFPQIndex:
             all_cand_dists = np.concatenate(cand_dist_list, axis=0)
             all_cand_ids = np.concatenate(cand_id_list, axis=0)
 
+        if filter_ids is not None:
+            if callable(filter_ids):
+                f_mask = np.fromiter((bool(filter_ids(int(x))) for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+            elif isinstance(filter_ids, (set, frozenset)):
+                f_mask = np.fromiter((int(x) in filter_ids for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+            else:
+                f_set = set(int(x) for x in filter_ids)
+                f_mask = np.fromiter((int(x) in f_set for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+            all_cand_dists = all_cand_dists[f_mask]
+            all_cand_ids = all_cand_ids[f_mask]
+
+        if len(all_cand_ids) == 0:
+            return SearchResult(
+                distances=np.empty((0,), dtype=np.float32),
+                ids=np.empty((0,), dtype=np.int64),
+                mask=np.empty((0,), dtype=bool),
+                distance_computations=self._nlist,
+                centroid_distance_computations=self._nlist,
+                candidate_distance_computations=0,
+            )
+
         # 3. Deterministic top-k selection
         res = select_top_k(all_cand_dists, all_cand_ids, k=k)
         total_cand_count = len(all_cand_ids)
@@ -486,6 +514,7 @@ class IVFPQIndex:
         queries: np.ndarray,
         k: int = 10,
         nprobe: int | None = None,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search nearest neighbors for query vectors using multi-probe IVF-PQ.
 
@@ -498,6 +527,8 @@ class IVFPQIndex:
         nprobe : int | None, default=None
             Number of inverted lists to probe (`1 <= nprobe <= nlist`). If None,
             defaults to `self.nprobe`.
+        filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+            Eligibility filter restricting candidates to matching external IDs.
 
         Returns
         -------
@@ -540,7 +571,7 @@ class IVFPQIndex:
                 )
             if not queries.flags.c_contiguous:
                 raise ValueError("queries must be C-contiguous in memory.")
-            return self._search_single(queries, k=k, eff_nprobe=eff_nprobe)
+            return self._search_single(queries, k=k, eff_nprobe=eff_nprobe, filter_ids=filter_ids)
 
         if queries.ndim != 2:
             raise ValueError(f"queries must be 1D or 2D array, got ndim={queries.ndim}")
@@ -615,6 +646,30 @@ class IVFPQIndex:
                 all_cand_dists = np.concatenate(cand_dist_list, axis=0)
                 all_cand_ids = np.concatenate(cand_id_list, axis=0)
 
+            if filter_ids is not None:
+                if callable(filter_ids):
+                    f_mask = np.fromiter((bool(filter_ids(int(x))) for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+                elif isinstance(filter_ids, (set, frozenset)):
+                    f_mask = np.fromiter((int(x) in filter_ids for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+                else:
+                    f_set = set(int(x) for x in filter_ids)
+                    f_mask = np.fromiter((int(x) in f_set for x in all_cand_ids), dtype=bool, count=len(all_cand_ids))
+                all_cand_dists = all_cand_dists[f_mask]
+                all_cand_ids = all_cand_ids[f_mask]
+
+            if len(all_cand_ids) == 0:
+                per_query_results.append(
+                    SearchResult(
+                        distances=np.empty((0,), dtype=np.float32),
+                        ids=np.empty((0,), dtype=np.int64),
+                        mask=np.empty((0,), dtype=bool),
+                        distance_computations=self._nlist,
+                        centroid_distance_computations=self._nlist,
+                        candidate_distance_computations=0,
+                    )
+                )
+                continue
+
             res = select_top_k(all_cand_dists, all_cand_ids, k=k)
             total_cands = len(all_cand_ids)
             per_query_results.append(
@@ -663,6 +718,159 @@ class IVFPQIndex:
             candidate_distance_computations=total_cand_dc,
         )
 
+    def add(
+        self,
+        vectors: np.ndarray,
+        ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Add new vectors to the index.
+
+        Assigns vectors to nearest coarse centroids, computes residuals, and encodes
+        them with existing Product Quantization codebooks without retraining.
+
+        Parameters
+        ----------
+        vectors : np.ndarray
+            Vectors array of shape `(N_new, d)` with strict `dtype=np.float32`.
+        ids : np.ndarray | None, default=None
+            Identifiers array of shape `(N_new,)` with strict `dtype=np.int64`. Must be unique
+            and not exist in index. If None, assigns sequential IDs.
+
+        Returns
+        -------
+        np.ndarray
+            The array of added IDs.
+        """
+        if not isinstance(vectors, np.ndarray):
+            raise TypeError(f"vectors must be a numpy ndarray, got {type(vectors).__name__}")
+        if vectors.dtype != np.float32:
+            raise TypeError(f"vectors must have dtype float32, got {vectors.dtype}")
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+        if vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D array, got ndim={vectors.ndim}")
+        if vectors.shape[1] != self._d:
+            raise ValueError(
+                f"Dimension mismatch: vectors have d={vectors.shape[1]} but index expects d={self._d}"
+            )
+        if not vectors.flags.c_contiguous:
+            vectors = np.ascontiguousarray(vectors)
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError("vectors must contain only finite numbers (no NaN or Inf).")
+
+        N_new = vectors.shape[0]
+        if N_new == 0:
+            return np.empty((0,), dtype=np.int64)
+
+        existing_ids: set[int] = set()
+        for lst in self._invlists:
+            for i in lst.ids:
+                existing_ids.add(int(i))
+
+        if ids is None:
+            start_id = max(existing_ids, default=-1) + 1
+            new_ids = np.arange(start_id, start_id + N_new, dtype=np.int64)
+        else:
+            if not isinstance(ids, np.ndarray):
+                raise TypeError(f"ids must be a numpy ndarray, got {type(ids).__name__}")
+            if ids.dtype != np.int64:
+                raise TypeError(f"ids must have dtype int64, got {ids.dtype}")
+            if ids.ndim != 1 or ids.shape[0] != N_new:
+                raise ValueError(f"ids must be 1D array of shape ({N_new},), got shape {ids.shape}")
+            if len(np.unique(ids)) != len(ids):
+                raise ValueError("Supplied IDs must be strictly unique.")
+            conflicts = [int(i) for i in ids if int(i) in existing_ids]
+            if conflicts:
+                raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
+            new_ids = np.ascontiguousarray(ids)
+
+        c_dists = pairwise_squared_l2_blas(vectors, self._centroids)
+        assigned_centroids = np.argmin(c_dists, axis=1)
+
+        residuals = (
+            vectors - self._centroids[assigned_centroids]
+            if self._use_residuals
+            else vectors
+        )
+        codes = self._pq.encode(residuals)
+
+        for i in range(N_new):
+            c = int(assigned_centroids[i])
+            lst = self._invlists[c]
+            new_code = codes[i : i + 1]
+            new_id = new_ids[i : i + 1]
+            if lst.size == 0:
+                self._invlists[c] = InvertedPQList(ids=new_id, codes=new_code)
+            else:
+                merged_codes = np.concatenate([lst.codes, new_code], axis=0)
+                merged_ids = np.concatenate([lst.ids, new_id], axis=0)
+                self._invlists[c] = InvertedPQList(ids=merged_ids, codes=merged_codes)
+
+        self._ntotal += N_new
+        return new_ids
+
+    def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
+        """Delete vectors by external ID from inverted lists.
+
+        Parameters
+        ----------
+        ids : Sequence[int] | np.ndarray | int
+            External ID(s) to remove from the index.
+
+        Returns
+        -------
+        int
+            Number of vectors successfully deleted.
+        """
+        if isinstance(ids, (int, np.integer)):
+            to_delete = {int(ids)}
+        elif isinstance(ids, (set, frozenset)):
+            to_delete = set(int(x) for x in ids)
+        else:
+            to_delete = set(int(x) for x in ids)
+
+        if not to_delete or self._ntotal == 0:
+            return 0
+
+        total_deleted = 0
+        code_dtype = self._invlists[0].codes.dtype if self._nlist > 0 else np.uint8
+        for c in range(self._nlist):
+            lst = self._invlists[c]
+            if lst.size == 0:
+                continue
+            mask_keep = np.array([int(i) not in to_delete for i in lst.ids], dtype=bool)
+            del_count = int(np.sum(~mask_keep))
+            if del_count > 0:
+                total_deleted += del_count
+                new_codes = (
+                    np.ascontiguousarray(lst.codes[mask_keep])
+                    if np.any(mask_keep)
+                    else np.empty((0, self._M), dtype=code_dtype)
+                )
+                new_ids = (
+                    np.ascontiguousarray(lst.ids[mask_keep])
+                    if np.any(mask_keep)
+                    else np.empty((0,), dtype=np.int64)
+                )
+                self._invlists[c] = InvertedPQList(ids=new_ids, codes=new_codes)
+
+        self._ntotal -= total_deleted
+        return total_deleted
+
+    def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:
+        """Save this IVFPQIndex to disk atomically with manifest and checksums."""
+        from indexora.persistence import save_index
+        return save_index(self, path, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, path: str | Path, verify_checksums: bool = True) -> IVFPQIndex:
+        """Load an IVFPQIndex from disk, verifying data integrity."""
+        from indexora.persistence import load_index
+        idx = load_index(path, verify_checksums=verify_checksums)
+        if not isinstance(idx, cls):
+            raise TypeError(f"Loaded index is of type {type(idx).__name__}, expected {cls.__name__}")
+        return idx
+
 
 def ivf_pq_build(
     database: np.ndarray,
@@ -700,8 +908,9 @@ def ivf_pq_search(
     queries: np.ndarray,
     k: int = 10,
     nprobe: int | None = None,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
 ) -> SearchResult:
     """Search an IVFPQIndex using query vectors."""
     if not isinstance(index, IVFPQIndex):
         raise TypeError(f"index must be an IVFPQIndex instance, got {type(index).__name__}")
-    return index.search(queries=queries, k=k, nprobe=nprobe)
+    return index.search(queries=queries, k=k, nprobe=nprobe, filter_ids=filter_ids)

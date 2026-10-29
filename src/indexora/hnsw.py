@@ -12,9 +12,11 @@ and NumPy:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import heapq
 import math
-from typing import Sequence
+from pathlib import Path
+from typing import Any, Sequence
 import numpy as np
 
 from indexora.topk import SearchResult
@@ -131,6 +133,9 @@ class HNSWIndex:
         self._data = valid_db
         self._ids = valid_ids
         self._ntotal = N
+        self._n_active = N
+        self._deleted_nodes: set[int] = set()
+        self._id_to_node: dict[int, int] = {int(valid_ids[i]): i for i in range(N)}
 
         # Graph representations:
         # self._graphs[level] is a list of lists of neighbor node indices
@@ -149,6 +154,15 @@ class HNSWIndex:
     # ------------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------------
+
+    @property
+    def n_active(self) -> int:
+        """Number of active (non-tombstoned) vectors in the index."""
+        return self._n_active
+
+    def __len__(self) -> int:
+        """Return the number of active vectors."""
+        return self._n_active
 
     @property
     def d(self) -> int:
@@ -329,6 +343,7 @@ class HNSWIndex:
                 enter_points=[curr_obj],
                 ef=self._ef_construction,
                 level=lvl,
+                include_deleted=True,
             )
 
             # Heuristic neighbor selection (Algorithm 4)
@@ -430,6 +445,8 @@ class HNSWIndex:
         enter_points: list[int],
         ef: int,
         level: int,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
+        include_deleted: bool = False,
     ) -> tuple[list[tuple[int, float]], int]:
         """Perform bounded best-first candidate exploration at a specific layer (Algorithm 2).
 
@@ -443,8 +460,30 @@ class HNSWIndex:
         visited: set[int] = set()
         dist_comps = 0
 
-        # C (candidates min-heap): (dist, ext_id, node_idx)
-        # W (dynamic pool max-heap): (-dist, -ext_id, node_idx)
+        # Filtering predicate: applied to candidates entering W
+        if include_deleted:
+            is_eligible_fn = lambda node_idx: True
+        elif filter_ids is None or level > 0:
+            is_eligible_fn = lambda node_idx: node_idx not in self._deleted_nodes
+        elif callable(filter_ids):
+            is_eligible_fn = (
+                lambda node_idx: node_idx not in self._deleted_nodes
+                and bool(filter_ids(int(self._ids[node_idx])))
+            )
+        elif isinstance(filter_ids, (set, frozenset)):
+            is_eligible_fn = (
+                lambda node_idx: node_idx not in self._deleted_nodes
+                and int(self._ids[node_idx]) in filter_ids
+            )
+        else:
+            f_set = set(int(x) for x in filter_ids)
+            is_eligible_fn = (
+                lambda node_idx: node_idx not in self._deleted_nodes
+                and int(self._ids[node_idx]) in f_set
+            )
+
+        # C (candidates min-heap): (dist, ext_id, node_idx) - explores all routing hops
+        # W (dynamic pool max-heap): (-dist, -ext_id, node_idx) - stores only eligible results
         c_min_heap: list[tuple[float, int, int]] = []
         w_max_heap: list[tuple[float, int, int]] = []
 
@@ -454,13 +493,14 @@ class HNSWIndex:
             dist_comps += 1
             ext_id = int(self._ids[ep])
             heapq.heappush(c_min_heap, (d, ext_id, ep))
-            heapq.heappush(w_max_heap, (-d, -ext_id, ep))
+            if is_eligible_fn(ep):
+                heapq.heappush(w_max_heap, (-d, -ext_id, ep))
 
-        furthest_w_dist = -w_max_heap[0][0]
+        furthest_w_dist = -w_max_heap[0][0] if w_max_heap else float("inf")
 
         while c_min_heap:
             closest_dist, _, closest_node = heapq.heappop(c_min_heap)
-            if closest_dist > furthest_w_dist:
+            if closest_dist > furthest_w_dist and len(w_max_heap) >= ef:
                 break
 
             for neighbor in self._graphs[level][closest_node]:
@@ -472,12 +512,13 @@ class HNSWIndex:
 
                     if d_nbr < furthest_w_dist or len(w_max_heap) < ef:
                         heapq.heappush(c_min_heap, (d_nbr, ext_id_nbr, neighbor))
-                        heapq.heappush(w_max_heap, (-d_nbr, -ext_id_nbr, neighbor))
+                        if is_eligible_fn(neighbor):
+                            heapq.heappush(w_max_heap, (-d_nbr, -ext_id_nbr, neighbor))
 
-                        if len(w_max_heap) > ef:
-                            heapq.heappop(w_max_heap)
+                            if len(w_max_heap) > ef:
+                                heapq.heappop(w_max_heap)
 
-                        furthest_w_dist = -w_max_heap[0][0]
+                            furthest_w_dist = -w_max_heap[0][0]
 
         # Extract elements from W pool
         pool = [(node_idx, -neg_dist) for neg_dist, _, node_idx in w_max_heap]
@@ -492,9 +533,10 @@ class HNSWIndex:
         query: np.ndarray,
         k: int,
         eff_ef: int,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search nearest neighbors for a single query vector of shape `(d,)`."""
-        if self._ntotal == 0 or self._enter_node is None:
+        if self._n_active == 0 or self._enter_node is None:
             return SearchResult(
                 distances=np.empty((0,), dtype=np.float32),
                 ids=np.empty((0,), dtype=np.int64),
@@ -522,12 +564,13 @@ class HNSWIndex:
                         curr_obj = neighbor
                         changed = True
 
-        # 2. Best-first search at layer 0 with candidate pool ef
+        # 2. Best-first search at layer 0 with candidate pool ef and eligibility filtering
         pool, layer0_dc = self._search_layer_internal(
             query=query,
             enter_points=[curr_obj],
             ef=eff_ef,
             level=0,
+            filter_ids=filter_ids,
         )
         total_dc += layer0_dc
 
@@ -555,6 +598,7 @@ class HNSWIndex:
         queries: np.ndarray,
         k: int = 10,
         ef_search: int | None = None,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search approximate nearest neighbors using HNSW graph traversal.
 
@@ -566,6 +610,8 @@ class HNSWIndex:
             Number of nearest neighbors to retrieve per query (`k >= 1`).
         ef_search : int | None, default=None
             Dynamic exploration depth during search. If None, uses `self.ef_search`.
+        filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+            Eligibility filter restricting candidates to matching external IDs.
 
         Returns
         -------
@@ -606,7 +652,7 @@ class HNSWIndex:
                 )
             if not queries.flags.c_contiguous:
                 raise ValueError("queries must be C-contiguous in memory.")
-            return self._search_single(queries, k=k, eff_ef=eff_ef)
+            return self._search_single(queries, k=k, eff_ef=eff_ef, filter_ids=filter_ids)
 
         if queries.ndim != 2:
             raise ValueError(f"queries must be 1D or 2D array, got ndim={queries.ndim}")
@@ -620,16 +666,16 @@ class HNSWIndex:
         num_queries = queries.shape[0]
         if num_queries == 0:
             return SearchResult(
-                distances=np.empty((0, min(k, self._ntotal)), dtype=np.float32),
-                ids=np.empty((0, min(k, self._ntotal)), dtype=np.int64),
-                mask=np.empty((0, min(k, self._ntotal)), dtype=bool),
+                distances=np.empty((0, min(k, self._n_active)), dtype=np.float32),
+                ids=np.empty((0, min(k, self._n_active)), dtype=np.int64),
+                mask=np.empty((0, min(k, self._n_active)), dtype=bool),
                 distance_computations=0,
                 centroid_distance_computations=0,
                 candidate_distance_computations=0,
             )
 
         per_query_results = [
-            self._search_single(queries[i], k=k, eff_ef=eff_ef)
+            self._search_single(queries[i], k=k, eff_ef=eff_ef, filter_ids=filter_ids)
             for i in range(num_queries)
         ]
 
@@ -662,6 +708,132 @@ class HNSWIndex:
             candidate_distance_computations=total_dc,
         )
 
+    def add(
+        self,
+        vectors: np.ndarray,
+        ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Add new vectors to the HNSW index incrementally without full rebuild.
+
+        Parameters
+        ----------
+        vectors : np.ndarray
+            Vectors array of shape `(N_new, d)` with strict `dtype=np.float32`.
+        ids : np.ndarray | None, default=None
+            Identifiers array of shape `(N_new,)` with strict `dtype=np.int64`. Must be unique
+            and not exist among currently active IDs in the index. If None, assigns sequential IDs.
+
+        Returns
+        -------
+        np.ndarray
+            The array of added IDs.
+        """
+        if not isinstance(vectors, np.ndarray):
+            raise TypeError(f"vectors must be a numpy ndarray, got {type(vectors).__name__}")
+        if vectors.dtype != np.float32:
+            raise TypeError(f"vectors must have dtype float32, got {vectors.dtype}")
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+        if vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D array, got ndim={vectors.ndim}")
+        if self._d > 0 and vectors.shape[1] != self._d:
+            raise ValueError(
+                f"Dimension mismatch: vectors have d={vectors.shape[1]} but index expects d={self._d}"
+            )
+        if not vectors.flags.c_contiguous:
+            vectors = np.ascontiguousarray(vectors)
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError("vectors must contain only finite numbers (no NaN or Inf).")
+
+        N_new = vectors.shape[0]
+        if N_new == 0:
+            return np.empty((0,), dtype=np.int64)
+
+        if ids is None:
+            start_id = max(self._id_to_node.keys(), default=-1) + 1
+            new_ids = np.arange(start_id, start_id + N_new, dtype=np.int64)
+        else:
+            if not isinstance(ids, np.ndarray):
+                raise TypeError(f"ids must be a numpy ndarray, got {type(ids).__name__}")
+            if ids.dtype != np.int64:
+                raise TypeError(f"ids must have dtype int64, got {ids.dtype}")
+            if ids.ndim != 1 or ids.shape[0] != N_new:
+                raise ValueError(f"ids must be 1D array of shape ({N_new},), got shape {ids.shape}")
+            if len(np.unique(ids)) != len(ids):
+                raise ValueError("Supplied IDs must be strictly unique.")
+            conflicts = [int(i) for i in ids if int(i) in self._id_to_node]
+            if conflicts:
+                raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
+            new_ids = np.ascontiguousarray(ids)
+
+        start_idx = self._ntotal
+        if self._data.shape[0] == 0:
+            self._data = vectors
+            self._ids = new_ids
+        else:
+            self._data = np.concatenate([self._data, vectors], axis=0)
+            self._ids = np.concatenate([self._ids, new_ids], axis=0)
+
+        for i in range(N_new):
+            node_idx = start_idx + i
+            ext_id = int(new_ids[i])
+            self._insert_vector(node_idx)
+            self._id_to_node[ext_id] = node_idx
+            self._ntotal += 1
+            self._n_active += 1
+
+        return new_ids
+
+    def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
+        """Delete vectors by external ID using tombstone marking.
+
+        Tombstoned vectors are excluded from all subsequent search results while
+        retaining their graph connectivity for navigable routing.
+
+        Parameters
+        ----------
+        ids : Sequence[int] | np.ndarray | int
+            External ID(s) to remove from the index.
+
+        Returns
+        -------
+        int
+            Number of vectors successfully deleted.
+        """
+        if isinstance(ids, (int, np.integer)):
+            to_delete = {int(ids)}
+        elif isinstance(ids, (set, frozenset)):
+            to_delete = set(int(x) for x in ids)
+        else:
+            to_delete = set(int(x) for x in ids)
+
+        if not to_delete or self._n_active == 0:
+            return 0
+
+        deleted_count = 0
+        for ext_id in to_delete:
+            if ext_id in self._id_to_node:
+                node_idx = self._id_to_node.pop(ext_id)
+                self._deleted_nodes.add(node_idx)
+                deleted_count += 1
+
+        self._n_active -= deleted_count
+        return deleted_count
+
+    def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:
+        """Save this HNSWIndex to disk atomically with manifest and checksums."""
+        from indexora.persistence import save_index
+        return save_index(self, path, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, path: str | Path, verify_checksums: bool = True) -> HNSWIndex:
+        """Load an HNSWIndex from disk, verifying data integrity."""
+        from indexora.persistence import load_index
+        idx = load_index(path, verify_checksums=verify_checksums)
+        if not isinstance(idx, cls):
+            raise TypeError(f"Loaded index is of type {type(idx).__name__}, expected {cls.__name__}")
+        return idx
+
 
 def hnsw_build(
     database: np.ndarray,
@@ -689,8 +861,9 @@ def hnsw_search(
     queries: np.ndarray,
     k: int = 10,
     ef_search: int | None = None,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
 ) -> SearchResult:
     """Search an HNSWIndex using query vectors."""
     if not isinstance(index, HNSWIndex):
         raise TypeError(f"index must be an HNSWIndex instance, got {type(index).__name__}")
-    return index.search(queries=queries, k=k, ef_search=ef_search)
+    return index.search(queries=queries, k=k, ef_search=ef_search, filter_ids=filter_ids)

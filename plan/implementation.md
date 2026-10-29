@@ -284,21 +284,21 @@ evidence.
 - **Exact Memory Accounting:** Reports `.vector_memory_bytes`, `.id_memory_bytes`, `.graph_edge_count`, `.graph_memory_bytes`, `.index_memory_bytes`, `.index_memory_mib`, and `.bytes_per_vector`.
 - **Benchmark Integration:** Added `--hnsw`, `--hnsw-m`, `--hnsw-ef-construction`, and `--hnsw-ef-search` CLI flags to `src/indexora/benchmark.py`. Validated on synthetic clustered benchmarks ($N=1,000, d=32$), achieving **1.0000 Recall@10** evaluating only 144 to 152 distances per query (~15% of database).
 
-### Phase 11 --- Mutations, filters, persistence (SHARED)
+### Phase 11 --- Mutations, filters, persistence (SHARED) [COMPLETED]
 
-First decide and document semantics for insert/delete/update, ID reuse,
-tombstones, filtering, and compaction. Then implement approved scope.
-Use `header.json` plus numeric `.npy`/`.npz` files, load with
-`allow_pickle=False`, validate all structures, and reject corrupt files.
+Implemented reliable index mutations (`add`, `delete`), metadata/ID filtering (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core Indexora index implementations.
 
-**Prompt:** "Propose ambiguous mutation/filter/persistence semantics for
-review before coding. After approval, implement only the agreed scope.
-Test corrupted state, deleted IDs, no-match filters, duplicate IDs, and
-rebuild consistency."
-
-**Gate:** operations match a live-record exact baseline; valid state
-round-trips; invalid state fails clearly. Tag v0.4 only when advertised
-operations pass.
+- **Capability Contract:** Established unambiguous support matrix across all five index architectures (`ExactFlatIndex`, `ExactBlasIndex`, `IVFFlatIndex`, `IVFPQIndex`, `HNSWIndex`).
+- **Mutation Semantics:**
+  - `add(vectors, ids=None)`: Appends vectors to flat stores, coarse inverted lists, or multi-layer graph structures. Handles automatic sequential ID assignment, enforces uniqueness, rejects duplicate ID conflicts, and strictly enforces float32 dtypes.
+  - `delete(ids)`: Inverted lists and flat indexes purge removed vectors and rebuild internal contiguous arrays. HNSW applies non-destructive tombstone markers (`_deleted_nodes`) preserving graph routing connectivity while completely excluding tombstoned vectors from search candidate pools.
+- **Filtered Search:** Added caller-supplied `filter_ids` parameter to `search()` supporting Sequences, Sets, NumPy `int64` arrays, or arbitrary Callables `(int) -> bool`. Excludes non-eligible vectors at level 0/candidate evaluation, preserving deterministic `(distance, external_id)` tie-breaking and maintaining standard `SearchResult` contract.
+- **Safe Persistence:**
+  - Zero arbitrary Python pickle: Pure `.npy` array storage using `np.save(allow_pickle=False)`.
+  - Atomic directory writes: Writes to temporary staging folder (`.tmp_<uuid>`) before atomic replacement.
+  - Integrity and provenance manifests: `manifest.json` tracks `schema_version="1.0"`, hyperparameters, array shapes, dtypes, and file SHA-256 checksums. Verified upon load with clear error reporting on corruption or version mismatch.
+  - Exact state restoration: Reconstructs HNSW multi-layer CSR graphs without graph rebuilds; reconstructs IVF-PQ codebooks and posting lists without retraining coarse k-means or subspace quantizers.
+- **Validation:** 88 dedicated unit tests across mutations (`test_mutations.py`), filtering (`test_filtering.py`), and persistence (`test_persistence.py`), achieving 291/291 passing tests in the full test suite.
 
 ### Phase 12 --- Semantic-search demo (AGENT-ASSISTED)
 

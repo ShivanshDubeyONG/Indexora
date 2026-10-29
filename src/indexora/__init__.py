@@ -44,6 +44,7 @@ from indexora.ivfpq import (
     ivf_pq_search,
 )
 from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
+from indexora.persistence import load_index, save_index
 from indexora.pq import ProductQuantizer
 from indexora.topk import SearchResult, select_top_k
 
@@ -86,6 +87,8 @@ __all__ = [
     "IVFPQIndex",
     "ivf_pq_build",
     "ivf_pq_search",
+    "save_index",
+    "load_index",
     "compute_recall_at_k",
     "compute_distance_aware_recall_at_k",
     "count_distance_computations",

@@ -10,10 +10,39 @@ approximate nearest neighbor (ANN) indexes, benchmarks, and recall evaluations.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
 import numpy as np
 
 from indexora.kernels import pairwise_squared_l2_blas, pairwise_squared_l2_ref
 from indexora.topk import SearchResult, select_top_k
+
+
+def _filter_database_by_ids(
+    database: np.ndarray,
+    ids: np.ndarray,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Filter database vectors and IDs according to filter specification."""
+    if filter_ids is None:
+        return database, ids, database.shape[0]
+
+    num_database = database.shape[0]
+    if num_database == 0:
+        return database, ids, 0
+
+    if callable(filter_ids):
+        eligible_mask = np.fromiter((bool(filter_ids(int(x))) for x in ids), dtype=bool, count=num_database)
+    elif isinstance(filter_ids, (set, frozenset)):
+        eligible_mask = np.fromiter((int(x) in filter_ids for x in ids), dtype=bool, count=num_database)
+    else:
+        filter_set = set(int(x) for x in filter_ids)
+        eligible_mask = np.fromiter((int(x) in filter_set for x in ids), dtype=bool, count=num_database)
+
+    filtered_db = database[eligible_mask]
+    filtered_ids = ids[eligible_mask]
+    return filtered_db, filtered_ids, filtered_db.shape[0]
 
 
 def _validate_ids(ids: np.ndarray, expected_n: int) -> np.ndarray:
@@ -124,6 +153,7 @@ def exact_search(
     k: int = 10,
     max_db_chunk: int = 32768,
     max_query_chunk: int = 1024,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
 ) -> SearchResult:
     """Perform exhaustive exact nearest-neighbor search using reference semantics.
 
@@ -192,8 +222,20 @@ def exact_search(
     else:
         ids_arr = _validate_ids(ids, expected_n=num_database)
 
+    if filter_ids is not None:
+        database, ids_arr, num_database = _filter_database_by_ids(database, ids_arr, filter_ids)
+
     is_single_query = queries.ndim == 1
     if is_single_query:
+        if num_database == 0:
+            return SearchResult(
+                distances=np.empty((0,), dtype=np.float32),
+                ids=np.empty((0,), dtype=np.int64),
+                mask=np.empty((0,), dtype=bool),
+                distance_computations=0,
+                centroid_distance_computations=0,
+                candidate_distance_computations=0,
+            )
         if num_database <= max_db_chunk:
             distances = pairwise_squared_l2_ref(queries, database)
             res = select_top_k(distances, ids_arr, k=k)
@@ -286,6 +328,7 @@ def exact_search_blas(
     k: int = 10,
     max_db_chunk: int = 32768,
     max_query_chunk: int = 1024,
+    filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
 ) -> SearchResult:
     """Perform exhaustive exact nearest-neighbor search accelerated via BLAS matrix multiplication.
 
@@ -354,8 +397,20 @@ def exact_search_blas(
     else:
         ids_arr = _validate_ids(ids, expected_n=num_database)
 
+    if filter_ids is not None:
+        database, ids_arr, num_database = _filter_database_by_ids(database, ids_arr, filter_ids)
+
     is_single_query = queries.ndim == 1
     if is_single_query:
+        if num_database == 0:
+            return SearchResult(
+                distances=np.empty((0,), dtype=np.float32),
+                ids=np.empty((0,), dtype=np.int64),
+                mask=np.empty((0,), dtype=bool),
+                distance_computations=0,
+                centroid_distance_computations=0,
+                candidate_distance_computations=0,
+            )
         if num_database <= max_db_chunk:
             distances = pairwise_squared_l2_blas(queries, database)
             res = select_top_k(distances, ids_arr, k=k)
@@ -544,6 +599,11 @@ class ExactFlatIndex:
         return self._database.shape[0]
 
     @property
+    def ntotal(self) -> int:
+        """Number of vectors in the database."""
+        return self._database.shape[0]
+
+    @property
     def d(self) -> int:
         """Dimensionality of the vector space."""
         return self._database.shape[1]
@@ -557,6 +617,7 @@ class ExactFlatIndex:
         queries: np.ndarray,
         k: int = 10,
         max_db_chunk: int = 32768,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search nearest neighbors for queries using reference semantics.
 
@@ -568,13 +629,134 @@ class ExactFlatIndex:
             Number of nearest neighbors to retrieve. Must be a positive integer (k >= 1).
         max_db_chunk : int, default=32768
             Maximum number of database vectors evaluated per block during distance scoring.
+        filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+            Eligibility filter restricting candidates to matching external IDs.
 
         Returns
         -------
         SearchResult
             SearchResult with `.distances` and `.ids`.
         """
-        return exact_search(queries=queries, database=self._database, ids=self._ids, k=k, max_db_chunk=max_db_chunk)
+        return exact_search(
+            queries=queries,
+            database=self._database,
+            ids=self._ids,
+            k=k,
+            max_db_chunk=max_db_chunk,
+            filter_ids=filter_ids,
+        )
+
+    def add(
+        self,
+        vectors: np.ndarray,
+        ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Add new vectors to the index.
+
+        Parameters
+        ----------
+        vectors : np.ndarray
+            Vectors array of shape `(N_new, d)` with strict `dtype=np.float32`.
+        ids : np.ndarray | None, default=None
+            Identifiers array of shape `(N_new,)` with strict `dtype=np.int64`. Must be unique
+            and must not exist among current index IDs. If None, assigns sequential IDs
+            starting from `max(self._ids, default=-1) + 1`.
+
+        Returns
+        -------
+        np.ndarray
+            The array of added IDs.
+        """
+        if not isinstance(vectors, np.ndarray):
+            raise TypeError(f"vectors must be a numpy ndarray, got {type(vectors).__name__}")
+        if vectors.dtype != np.float32:
+            raise TypeError(f"vectors must have dtype float32, got {vectors.dtype}")
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+        if vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D array, got ndim={vectors.ndim}")
+        if self._database.ndim == 2 and self._database.shape[1] > 0 and vectors.shape[1] != self._database.shape[1]:
+            raise ValueError(
+                f"Dimension mismatch: vectors have d={vectors.shape[1]} but index expects d={self._database.shape[1]}"
+            )
+        if not vectors.flags.c_contiguous:
+            vectors = np.ascontiguousarray(vectors)
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError("vectors must contain only finite numbers (no NaN or Inf).")
+
+        N_new = vectors.shape[0]
+        if N_new == 0:
+            return np.empty((0,), dtype=np.int64)
+
+        if ids is None:
+            start_id = int(np.max(self._ids)) + 1 if len(self._ids) > 0 else 0
+            new_ids = np.arange(start_id, start_id + N_new, dtype=np.int64)
+        else:
+            if not isinstance(ids, np.ndarray):
+                raise TypeError(f"ids must be a numpy ndarray, got {type(ids).__name__}")
+            if ids.dtype != np.int64:
+                raise TypeError(f"ids must have dtype int64, got {ids.dtype}")
+            if ids.ndim != 1 or ids.shape[0] != N_new:
+                raise ValueError(f"ids must be 1D array of shape ({N_new},), got shape {ids.shape}")
+            if len(np.unique(ids)) != len(ids):
+                raise ValueError("Supplied IDs must be strictly unique.")
+            existing_set = set(int(x) for x in self._ids)
+            conflicts = [int(i) for i in ids if int(i) in existing_set]
+            if conflicts:
+                raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
+            new_ids = np.ascontiguousarray(ids)
+
+        if self._database.shape[0] == 0:
+            self._database = vectors
+            self._ids = new_ids
+        else:
+            self._database = np.concatenate([self._database, vectors], axis=0)
+            self._ids = np.concatenate([self._ids, new_ids], axis=0)
+        return new_ids
+
+    def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
+        """Delete vectors by external ID.
+
+        Parameters
+        ----------
+        ids : Sequence[int] | np.ndarray | int
+            External ID(s) to remove from the index.
+
+        Returns
+        -------
+        int
+            Number of vectors successfully deleted.
+        """
+        if isinstance(ids, (int, np.integer)):
+            to_delete = {int(ids)}
+        elif isinstance(ids, (set, frozenset)):
+            to_delete = set(int(x) for x in ids)
+        else:
+            to_delete = set(int(x) for x in ids)
+
+        if not to_delete or len(self._ids) == 0:
+            return 0
+
+        mask_keep = np.array([int(i) not in to_delete for i in self._ids], dtype=bool)
+        deleted_count = int(np.sum(~mask_keep))
+        if deleted_count > 0:
+            self._database = np.ascontiguousarray(self._database[mask_keep])
+            self._ids = np.ascontiguousarray(self._ids[mask_keep])
+        return deleted_count
+
+    def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:
+        """Save this index to disk atomically with manifest and checksums."""
+        from indexora.persistence import save_index
+        return save_index(self, path, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, path: str | Path, verify_checksums: bool = True) -> ExactFlatIndex:
+        """Load an ExactFlatIndex from disk, verifying data integrity."""
+        from indexora.persistence import load_index
+        idx = load_index(path, verify_checksums=verify_checksums)
+        if not isinstance(idx, cls):
+            raise TypeError(f"Loaded index is of type {type(idx).__name__}, expected {cls.__name__}")
+        return idx
 
     @property
     def index_memory_bytes(self) -> int:
@@ -657,6 +839,11 @@ class ExactBlasIndex:
         return self._database.shape[0]
 
     @property
+    def ntotal(self) -> int:
+        """Number of vectors in the database."""
+        return self._database.shape[0]
+
+    @property
     def d(self) -> int:
         """Dimensionality of the vector space."""
         return self._database.shape[1]
@@ -671,6 +858,7 @@ class ExactBlasIndex:
         k: int = 10,
         max_db_chunk: int = 32768,
         max_query_chunk: int = 1024,
+        filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
     ) -> SearchResult:
         """Search nearest neighbors for queries using BLAS-accelerated exact scan.
 
@@ -684,6 +872,8 @@ class ExactBlasIndex:
             Maximum number of database vectors evaluated per block during distance scoring.
         max_query_chunk : int, default=1024
             Maximum number of query vectors evaluated per block during distance scoring.
+        filter_ids : Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None, default=None
+            Eligibility filter restricting candidates to matching external IDs.
 
         Returns
         -------
@@ -697,7 +887,120 @@ class ExactBlasIndex:
             k=k,
             max_db_chunk=max_db_chunk,
             max_query_chunk=max_query_chunk,
+            filter_ids=filter_ids,
         )
+
+    def add(
+        self,
+        vectors: np.ndarray,
+        ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Add new vectors to the index.
+
+        Parameters
+        ----------
+        vectors : np.ndarray
+            Vectors array of shape `(N_new, d)` with strict `dtype=np.float32`.
+        ids : np.ndarray | None, default=None
+            Identifiers array of shape `(N_new,)` with strict `dtype=np.int64`. Must be unique
+            and must not exist among current index IDs. If None, assigns sequential IDs
+            starting from `max(self._ids, default=-1) + 1`.
+
+        Returns
+        -------
+        np.ndarray
+            The array of added IDs.
+        """
+        if not isinstance(vectors, np.ndarray):
+            raise TypeError(f"vectors must be a numpy ndarray, got {type(vectors).__name__}")
+        if vectors.dtype != np.float32:
+            raise TypeError(f"vectors must have dtype float32, got {vectors.dtype}")
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+        if vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D array, got ndim={vectors.ndim}")
+        if self._database.ndim == 2 and self._database.shape[1] > 0 and vectors.shape[1] != self._database.shape[1]:
+            raise ValueError(
+                f"Dimension mismatch: vectors have d={vectors.shape[1]} but index expects d={self._database.shape[1]}"
+            )
+        if not vectors.flags.c_contiguous:
+            vectors = np.ascontiguousarray(vectors)
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError("vectors must contain only finite numbers (no NaN or Inf).")
+
+        N_new = vectors.shape[0]
+        if N_new == 0:
+            return np.empty((0,), dtype=np.int64)
+
+        if ids is None:
+            start_id = int(np.max(self._ids)) + 1 if len(self._ids) > 0 else 0
+            new_ids = np.arange(start_id, start_id + N_new, dtype=np.int64)
+        else:
+            if not isinstance(ids, np.ndarray):
+                raise TypeError(f"ids must be a numpy ndarray, got {type(ids).__name__}")
+            if ids.dtype != np.int64:
+                raise TypeError(f"ids must have dtype int64, got {ids.dtype}")
+            if ids.ndim != 1 or ids.shape[0] != N_new:
+                raise ValueError(f"ids must be 1D array of shape ({N_new},), got shape {ids.shape}")
+            if len(np.unique(ids)) != len(ids):
+                raise ValueError("Supplied IDs must be strictly unique.")
+            existing_set = set(int(x) for x in self._ids)
+            conflicts = [int(i) for i in ids if int(i) in existing_set]
+            if conflicts:
+                raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
+            new_ids = np.ascontiguousarray(ids)
+
+        if self._database.shape[0] == 0:
+            self._database = vectors
+            self._ids = new_ids
+        else:
+            self._database = np.concatenate([self._database, vectors], axis=0)
+            self._ids = np.concatenate([self._ids, new_ids], axis=0)
+        return new_ids
+
+    def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
+        """Delete vectors by external ID.
+
+        Parameters
+        ----------
+        ids : Sequence[int] | np.ndarray | int
+            External ID(s) to remove from the index.
+
+        Returns
+        -------
+        int
+            Number of vectors successfully deleted.
+        """
+        if isinstance(ids, (int, np.integer)):
+            to_delete = {int(ids)}
+        elif isinstance(ids, (set, frozenset)):
+            to_delete = set(int(x) for x in ids)
+        else:
+            to_delete = set(int(x) for x in ids)
+
+        if not to_delete or len(self._ids) == 0:
+            return 0
+
+        mask_keep = np.array([int(i) not in to_delete for i in self._ids], dtype=bool)
+        deleted_count = int(np.sum(~mask_keep))
+        if deleted_count > 0:
+            self._database = np.ascontiguousarray(self._database[mask_keep])
+            self._ids = np.ascontiguousarray(self._ids[mask_keep])
+        return deleted_count
+
+    def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:
+        """Save this index to disk atomically with manifest and checksums."""
+        from indexora.persistence import save_index
+        return save_index(self, path, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, path: str | Path, verify_checksums: bool = True) -> ExactBlasIndex:
+        """Load an ExactBlasIndex from disk, verifying data integrity."""
+        from indexora.persistence import load_index
+        idx = load_index(path, verify_checksums=verify_checksums)
+        if not isinstance(idx, cls):
+            raise TypeError(f"Loaded index is of type {type(idx).__name__}, expected {cls.__name__}")
+        return idx
 
     @property
     def index_memory_bytes(self) -> int:
