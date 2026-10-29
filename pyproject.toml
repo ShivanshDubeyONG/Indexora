@@ -43,3 +43,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: opt-in tests requiring external models or network access",
+]
+addopts = "-m 'not integration'"

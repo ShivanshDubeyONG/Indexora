@@ -18,6 +18,7 @@ from indexora.semantic import (
     SentenceTransformersNotAvailableError,
     build_semantic_engine,
     encode_texts,
+    get_embedding_model,
     is_sentence_transformers_available,
     load_demo_corpus,
 )
@@ -293,6 +294,47 @@ def test_mock_embed_texts():
         assert np.isclose(np.linalg.norm(row), 1.0, atol=1e-5)
 
 
-def test_is_sentence_transformers_available():
-    # sentence-transformers is installed in the test environment
+def test_is_sentence_transformers_available_returns_bool():
+    """Verify boolean contract of availability check in any environment."""
+    assert isinstance(is_sentence_transformers_available(), bool)
+
+
+def test_is_sentence_transformers_available_true_path(monkeypatch):
+    """Verify True path when sentence-transformers is present in sys.modules."""
+    import sys
+    from unittest.mock import MagicMock
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", MagicMock())
     assert is_sentence_transformers_available() is True
+
+
+def test_is_sentence_transformers_available_false_path(monkeypatch):
+    """Verify False path when sentence-transformers is absent/unimportable."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+    assert is_sentence_transformers_available() is False
+
+
+def test_get_embedding_model_missing_dependency_raises(monkeypatch):
+    """Verify get_embedding_model raises SentenceTransformersNotAvailableError when absent."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+    with pytest.raises(SentenceTransformersNotAvailableError, match="pip install"):
+        get_embedding_model(model_name="uncached-test-model")
+
+
+@pytest.mark.integration
+def test_real_pretrained_model_integration_opt_in():
+    """Opt-in integration test using real pretrained weights.
+
+    Only executed when explicitly requested with: pytest -m integration
+    """
+    if not is_sentence_transformers_available():
+        pytest.skip("sentence-transformers is not installed")
+
+    res = encode_texts("vector search engine", normalize=True)
+    assert isinstance(res, np.ndarray)
+    assert res.shape == (384,)
+    assert np.isclose(np.linalg.norm(res), 1.0, atol=1e-5)
