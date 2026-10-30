@@ -51,6 +51,17 @@ In contrast, the binomial expansion $\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot
 
 On SIFT-100k ($N=100,000, d=128$), Exact BLAS achieves **19.5 QPS (103.5 ms mean latency)** compared to **6.2 QPS (155.8 ms mean latency)** for the reference kernel—a **3.1x throughput speedup**.
 
+#### Deep Dive: Why does `ExactBlasIndex` report ~19.5 QPS on SIFT-100k while a minimal direct BLAS matrix scan reaches ~700+ QPS?
+This is a high-value interview discussion demonstrating deep understanding of memory architectures and NumPy internals:
+1. **Dynamic Norm Recomputation:** `pairwise_squared_l2_blas` recalculates `db_sq = np.sum(database * database, axis=1)` dynamically on every invocation. When queries are processed, database norms are re-evaluated instead of cached on the index.
+2. **Chunking Boundary Fallback:** `exact_search_blas` enforces `max_db_chunk=32768` to bound peak RAM. For datasets where $N > 32768$ (such as SIFT-100k), the batched query path routes into `_exact_search_single_incremental_blas`. This processes queries sequentially in a Python loop rather than executing a single matrix-matrix GEMM multiplication (`queries @ database.T`).
+3. **GEMM (Matrix-Matrix) vs. GEMV (Matrix-Vector):** A batched matrix multiplication (`(Q, d) @ (d, N)`) achieves peak CPU FLOP throughput via multi-core cache tiling. Serial single-query scans execute as vector-matrix GEMV, which is memory-bandwidth bound and incurs repeated Python loop overhead and incremental top-$k$ merging.
+4. **Empirical Measurement ($N=100k, d=128, k=10$):**
+   - Batched direct BLAS with precomputed norms: **1.35 ms/query (743 QPS)**.
+   - ExactBlasIndex with unconstrained chunk (`max_db_chunk=131072`): **2.66 ms/query (376 QPS)**.
+   - ExactBlasIndex default chunked scan (`max_db_chunk=32768`): **22.5–55.6 ms/query (18–44 QPS)**.
+   - Reference coordinate difference kernel: **150.7 ms/query (6.2 QPS)**.
+
 ---
 
 ## 2. Inverted File & Clustering (IVF-Flat)
@@ -186,6 +197,23 @@ A credible engineer knows their system's boundaries:
 
 ---
 
+### Q17: Why was a non-monotonic batch QPS artifact observed on SIFT-100k for IVF-Flat ($n_{\text{list}}=50, n_{\text{probe}}=10$ vs. $20$)?
+**Answer:**
+In `results/sift100k_p66/benchmark_summary.csv`, $n_{\text{probe}}=10$ reported **8.2 batch QPS** while $n_{\text{probe}}=20$ reported **16.4 batch QPS**. Understanding this artifact demonstrates measurement rigor:
+1. **Per-Query Latency vs. Batch QPS:** Individual query latencies sampled across 500 independent queries were **strictly monotonic**:
+   - $n_{\text{probe}}=1$: $p_{50} = 3.83$ ms
+   - $n_{\text{probe}}=2$: $p_{50} = 7.15$ ms
+   - $n_{\text{probe}}=5$: $p_{50} = 17.55$ ms
+   - $n_{\text{probe}}=10$: $p_{50} = 36.19$ ms
+   - $n_{\text{probe}}=20$: $p_{50} = 67.90$ ms
+2. **Distance Computations were Strictly Monotonic:**
+   - $n_{\text{probe}}=10$: 21,754 distance computations/query.
+   - $n_{\text{probe}}=20$: 40,973 distance computations/query.
+3. **Root Cause:** Batch QPS is measured by executing 5 repeated batch sweeps of 1,000 queries. During the $n_{\text{probe}}=10$ batch run, transient host CPU thermal throttling and Windows thread allocation delays inflated the batch elapsed time. In contrast, the earlier run in `results/sift100k` was strictly monotonic across all values (329.3 $\to$ 173.5 $\to$ 63.3 $\to$ 29.4 $\to$ 12.9 QPS).
+4. **Protocol Lesson:** Always report individual sampled latency percentiles alongside batch throughput, use median rather than mean across batch runs, and document external operating system variance.
+
+---
+
 ## 7. Two-Minute Live Demonstration Script
 
 When presenting Indexora in an interview or demo, follow this 4-step walkthrough:
@@ -193,7 +221,7 @@ When presenting Indexora in an interview or demo, follow this 4-step walkthrough
 ```bash
 # Step 1: Verify Algorithmic Correctness (15s)
 pytest -q
-# Point out: 325 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
+# Point out: 328 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
 
 # Step 2: Run Offline Smoke Benchmark (10s)
 python -m indexora.benchmark --smoke --no-plot
@@ -212,3 +240,94 @@ streamlit run src/indexora/ui.py
 # - Show that squared L2 distance directly mirrors cosine similarity.
 # - Demonstrate category filtering restricting results exclusively to Databases.
 ```
+
+---
+
+## 8. Source Code Study Map for Technical Interviews
+
+When asked to walk through the codebase or explain specific algorithms, refer to these exact files, classes, and algorithmic flows:
+
+### 8.1 IVF-Flat Search & Candidate Gathering
+- **Files & Symbols:**
+  - [`src/indexora/ivf.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py): [`IVFFlatIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L424), [`ivf_flat_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L806), [`InvertedList`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L45).
+  - [`src/indexora/kmeans.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py): [`kmeans_plus_plus`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py#L110), [`kmeans`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py#L220).
+- **Data Flow:**
+  1. `queries` $\to$ coarse quantization against `self._centroids` via [`pairwise_squared_l2_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L163).
+  2. Coarse distances are sorted with `np.argsort(..., kind="stable")[:, :eff_nprobe]` to identify the closest posting lists.
+  3. Candidate vectors and external IDs are extracted from `self._invlists[c]` and concatenated with `np.concatenate`.
+  4. Candidate vectors pass through single-stage filtering (`filter_ids`).
+  5. Candidate distances are computed via BLAS GEMV or reference coordinate differences.
+  6. [`select_top_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L50) applies `np.argpartition` and `np.lexsort` for deterministic tie-breaking.
+- **Complexity:**
+  - Coarse quantization: $O(n_{\text{list}} \cdot d)$.
+  - Candidate scoring: $O\left(\frac{N}{n_{\text{list}}} \cdot n_{\text{probe}} \cdot d\right)$.
+  - Top-$k$ selection: $O(N_{\text{cand}} + k \log k)$.
+- **Key Invariant:** When $n_{\text{probe}} = n_{\text{list}}$, IVF-Flat evaluates all database records, producing bit-for-bit identical results with exact search.
+
+### 8.2 HNSW Insertion & Multi-Layer Graph Search
+- **Files & Symbols:**
+  - [`src/indexora/hnsw.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py): [`HNSWIndex.add`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L470), [`HNSWIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L320), [`_search_layer`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L120), [`_select_neighbors_heuristic`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L190).
+- **Data Flow:**
+  - **Search Path:**
+    1. Traversal begins at `self._enter_point` at `self._max_level`.
+    2. For layers $l \in [L_{\max}, 1]$, search executes greedy 1-recall descent (`ef=1`), jumping across long-range express edges toward the query.
+    3. At layer 0, search executes a bounded priority-queue beam search (`_search_layer`) tracking `ef_search` closest candidates.
+    4. Tombstone-deleted nodes serve as graph routing relays but are excluded from the candidate heap.
+    5. Final top-$k$ candidates are sorted by `(distance, ID)`.
+  - **Insertion Path:**
+    1. Exponential layer sampling: $l = \lfloor -\ln(U(0, 1)) / \ln(M) \rfloor$.
+    2. Greedy navigation from $L_{\max}$ down to $l+1$.
+    3. From $\min(l, L_{\max})$ down to 0, gather candidates with `_search_layer(ef=ef_construction)` and select diverse neighbors via Algorithm 4 heuristic (`_select_neighbors_heuristic`).
+    4. Establish bidirectional edges; if node degree exceeds $M$ ($2M$ at layer 0), re-run heuristic neighbor selection to prune redundant links.
+- **Complexity:**
+  - Query time: $O(\log N \cdot d)$.
+  - Build time: $O(N \log N \cdot d)$.
+  - Memory: $O(N \cdot M \cdot \text{sizeof}(\text{int32}))$.
+
+### 8.3 Product Quantization Training & Subspace Encoding
+- **Files & Symbols:**
+  - [`src/indexora/pq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py): [`ProductQuantizer.fit`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L110), [`ProductQuantizer.encode`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L210), [`ProductQuantizer.decode`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L260).
+- **Data Flow:**
+  1. $d$-dimensional vector space is decomposed into $M$ orthogonal subspaces: $d_{\text{sub}} = d / M$.
+  2. For each subspace $m \in [0, M-1]$, an independent $K$-means codebook of $k_{\text{sub}}=256$ centroids is trained.
+  3. During `encode(X)`: each sub-vector $X[:, m \cdot d_{\text{sub}} : (m+1) \cdot d_{\text{sub}}]$ is mapped to the index of its closest sub-centroid.
+  4. Code indices are stored as `uint8` (`uint16` if $k_{\text{sub}} > 256$).
+- **Compression Intuition:**
+  - Raw vector: $128 \times 4\text{ bytes} = 512$ bytes.
+  - PQ code ($M=8$): $8 \times 1\text{ byte} = 8$ bytes (**64x raw vector compression**).
+  - Total index storage: Includes durable `int64` IDs (8 bytes/vec) + coarse centroids + codebooks, yielding **15.2x measured compression** for $N=10,000, d=128$.
+
+### 8.4 IVF-PQ Asymmetric Distance Computation (ADC)
+- **Files & Symbols:**
+  - [`src/indexora/ivfpq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py): [`IVFPQIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L350), [`ivf_pq_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L650), [`_compute_query_lut`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L200).
+- **Data Flow:**
+  1. Coarse quantization selects $n_{\text{probe}}$ coarse centroids.
+  2. For each probed centroid $C_k$, compute the residual query $r_q = q - C_k$.
+  3. Construct Asymmetric Distance Look-Up Table (LUT) of shape $(M, k_{\text{sub}})$:
+     $$\text{LUT}[m, c] = \|r_q^{(m)} - \text{codebook}[m, c]\|^2$$
+  4. For candidate vectors in posting list $L_k$, approximate squared L2 distance via table lookups:
+     $$d_{\text{ADC}}^2(q, x_i) \approx \sum_{m=0}^{M-1} \text{LUT}[m, \text{codes}_{i, m}]$$
+  5. Top-$k$ candidates are retrieved without decompressing full database vectors.
+- **Complexity:**
+  - LUT build: $O(n_{\text{probe}} \cdot M \cdot d_{\text{sub}} \cdot k_{\text{sub}})$.
+  - Candidate evaluation: $O(N_{\text{cand}} \cdot M)$ table lookups and integer additions.
+
+### 8.5 Exact Search, BLAS Kernels, and Deterministic Top-k
+- **Files & Symbols:**
+  - [`src/indexora/kernels.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py): [`pairwise_squared_l2_ref`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L60), [`pairwise_squared_l2_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L163).
+  - [`src/indexora/topk.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py): [`select_top_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L50), [`SearchResult`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L20).
+  - [`src/indexora/exact.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py): [`ExactFlatIndex`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L660), [`ExactBlasIndex`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L779), [`exact_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L149), [`exact_search_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L324).
+- **Core Operations:**
+  - Reference kernel uses float64 coordinate accumulation to eliminate numerical cancellation error.
+  - BLAS kernel evaluates $\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot x)$ with `np.dot` (GEMM).
+  - Top-$k$ selection filters tombstones/ineligible IDs, partitions with `np.argpartition`, and resolves ties with ascending `(distance, ID)` composite sort using `np.lexsort`.
+
+### 8.6 Evaluation Metrics & Benchmark Harness
+- **Files & Symbols:**
+  - [`src/indexora/eval.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py): [`compute_recall_at_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py#L20), [`compute_distance_aware_recall_at_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py#L70).
+  - [`src/indexora/benchmark.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py): [`_measure_per_query_latency`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L640), [`_measure_batch_throughput`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L675), [`run_benchmark`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L702).
+- **Core Methodology:**
+  - Disentangles array padding (`mask=False`) from real negative IDs (`id=-1`).
+  - Separates individual per-query latency percentiles ($p_{50}, p_{95}, p_{99}$) sampled over 500 queries from repeated full-batch throughput ($Q / t$).
+  - Distance-aware recall resolves equidistant boundary ties ($d \le d_k^{\text{GT}} + \epsilon$) for exact candidate scoring.
+  - Automatically captures process peak RSS and persistent index storage memory.

@@ -1,0 +1,9 @@
+# Core vector search engine and interactive UI dependencies
+numpy>=1.23.0
+pandas>=1.4.0
+matplotlib>=3.5.0
+streamlit>=1.30.0
+
+# Install local indexora package from src
+-e .
+

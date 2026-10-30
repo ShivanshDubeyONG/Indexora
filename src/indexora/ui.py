@@ -1,4 +1,4 @@
-"""Indexora Interactive Index Lab — Web-based exploration UI.
+"""Indexora Interactive Index Lab — Production Developer Tool UI.
 
 Built with Streamlit and backed directly by Indexora's core Python vector engine.
 Demonstrates exact search, IVF-Flat, IVF-PQ, HNSW, filtered retrieval, mutations,
@@ -12,6 +12,11 @@ from pathlib import Path
 import sys
 import time
 from typing import Any
+
+# Ensure 'src' package directory is available across cloud and local execution
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -44,164 +49,459 @@ from indexora.semantic import (
 
 
 def _apply_custom_styling() -> None:
-    """Inject clean developer-tool CSS styling inspired by modern tech dashboards into Streamlit."""
+    """Inject premium, modern dark-tech developer-tool styling inspired by GridPulse, Linear, and Vercel."""
     st.markdown(
         """
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
         <style>
-        /* Global Typography: Poppins for clean, modern readability */
-        html, body, [class*="css"], .stApp, p, span, div, label, li, .stMarkdown, .stSelectbox, .stSlider {
+        /* =========================================================================
+           INDEXORA DESIGN SYSTEM: GRIDPULSE / LINEAR / VERCEL INSPIRED
+           Palette: Midnight Slate & Deep Zinc with Electric Indigo/Sky Cyan Accents
+           Canvas: #090d16 | Surface: #0e1424 | Surface Elevated: #131b30
+           Borders: rgba(255, 255, 255, 0.08) | Accent: #6366f1 | Cyan: #38bdf8
+           Headings: Montserrat | Body: Poppins | Code/Metrics: JetBrains Mono
+        ========================================================================= */
+
+        /* 1. Global Reset & App Foundation */
+        .stApp {
+            background-color: #090d16 !important;
+            color: #f8fafc !important;
             font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             letter-spacing: -0.01em;
         }
 
-        /* Headings: Montserrat for bold, geometric, tech-forward authority */
-        h1, h2, h3, h4, h5, h6, .main-header, [data-testid="stHeader"] {
-            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif !important;
-            font-weight: 700 !important;
-            letter-spacing: -0.025em !important;
+        /* Ambient subtle radial glow */
+        .stApp::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; right: 0; height: 320px;
+            background: radial-gradient(circle 800px at 50% -120px, rgba(99, 102, 241, 0.14), transparent 70%);
+            pointer-events: none;
+            z-index: 0;
         }
 
-        .main-header {
+        /* Hide Streamlit Chrome & Watermarks */
+        #MainMenu, footer {
+            display: none !important;
+        }
+        [data-testid="stHeader"] {
+            background-color: rgba(9, 13, 22, 0.85) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+        }
+
+        /* Sidebar toggle buttons: clean custom SVG/CSS chevron icon — never blank, no ligature leaks */
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="stExpandSidebarButton"] {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 2rem !important;
+            height: 2rem !important;
+            border-radius: 8px !important;
+            background: rgba(255, 255, 255, 0.04) !important;
+            border: 1px solid rgba(255, 255, 255, 0.09) !important;
+            cursor: pointer !important;
+            transition: all 0.15s ease !important;
+        }
+        [data-testid="stSidebarCollapseButton"]:hover,
+        [data-testid="stExpandSidebarButton"]:hover {
+            color: #f8fafc !important;
+            background: rgba(255, 255, 255, 0.09) !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
+        }
+        [data-testid="stSidebarCollapseButton"]::before {
+            content: "‹";
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #94a3b8;
+            line-height: 1;
+            margin-top: -2px;
+        }
+        [data-testid="stExpandSidebarButton"]::before {
+            content: "›";
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #94a3b8;
+            line-height: 1;
+            margin-top: -2px;
+        }
+        [data-testid="stSidebarCollapseButton"]:hover::before,
+        [data-testid="stExpandSidebarButton"]:hover::before {
+            color: #f8fafc;
+        }
+        /* Completely suppress all child text/spans inside collapse buttons */
+        [data-testid="stSidebarCollapseButton"] > *,
+        [data-testid="stExpandSidebarButton"] > * {
+            display: none !important;
+        }
+
+        /* 2. Typography Hierarchy */
+        html, body, p, span, div, label, li, .stMarkdown {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif !important;
+            color: #94a3b8;
+        }
+        h1, h2, h3, h4, h5, h6, .idx-title, .idx-card-title {
             font-family: 'Montserrat', sans-serif !important;
-            font-size: 2.25rem !important;
-            font-weight: 800 !important;
-            letter-spacing: -0.035em !important;
-            margin-bottom: 0.25rem !important;
-            line-height: 1.2 !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.02em !important;
+            color: #f8fafc !important;
         }
-        .sub-header {
-            font-family: 'Poppins', sans-serif !important;
-            font-size: 0.98rem !important;
-            font-weight: 400 !important;
+        h1, .idx-title {
+            font-weight: 700 !important;
+            letter-spacing: -0.03em !important;
+        }
+        strong, b {
+            color: #f8fafc !important;
+            font-weight: 600 !important;
+        }
+
+        /* Monospace Elements */
+        code, pre, .font-mono, [data-testid="stDataFrame"], .stCode, kbd {
+            font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+        }
+        code {
+            background: rgba(99, 102, 241, 0.1) !important;
+            color: #a5b4fc !important;
+            border: 1px solid rgba(99, 102, 241, 0.22) !important;
+            padding: 0.12rem 0.35rem !important;
+            border-radius: 4px !important;
+            font-size: 0.82em !important;
+            white-space: nowrap !important;
+        }
+
+        /* 3. Sidebar Shell */
+        [data-testid="stSidebar"] {
+            background-color: #0b101c !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+            padding-top: 1rem !important;
+        }
+        [data-testid="stSidebar"] hr {
+            border-color: rgba(255, 255, 255, 0.07) !important;
+            margin: 1.25rem 0 !important;
+        }
+        .sidebar-section-title {
+            font-size: 0.72rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
             color: #64748b !important;
-            margin-bottom: 1.5rem !important;
+            margin-bottom: 0.85rem !important;
         }
 
-        /* Technical Monospace: JetBrains Mono for Code, Coordinates, Numbers, Distances */
-        code, pre, .font-mono, .stMetric [data-testid="stMetricValue"], [data-testid="stDataFrame"], .stCode, kbd {
-            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+        /* 4. Product Header Banner */
+        .idx-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 0 1.25rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 1.5rem;
         }
-
-        /* Metric Cards: Crisp, rounded borders with JetBrains Mono numbers */
-        [data-testid="stMetric"] {
-            background: rgba(248, 250, 252, 0.85);
-            border: 1px solid #e2e8f0;
+        .idx-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .idx-logo-badge {
+            width: 34px;
+            height: 34px;
+            background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
             border-radius: 8px;
-            padding: 0.75rem 1rem;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.15rem;
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
         }
-        [data-testid="stMetric"]:hover {
-            border-color: #cbd5e1;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        .idx-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            color: #ffffff;
+            margin: 0;
+            line-height: 1.2;
+        }
+        .idx-tagline {
+            font-size: 0.82rem;
+            color: #64748b;
+            margin: 0;
+            line-height: 1.3;
+        }
+        .idx-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.3rem 0.7rem;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.22);
+            border-radius: 9999px;
+            font-size: 0.76rem;
+            font-weight: 500;
+            color: #34d399;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .idx-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        /* 5. Navigation Tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.35rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0 0 4px 0;
+            background: transparent;
+            margin-bottom: 1.5rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+            padding: 0 0 6px 0 !important;
+            background: transparent !important;
+            margin-bottom: 2rem !important;
+        }
+        .stTabs [data-baseweb="tab-highlight"] {
+            display: none !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            font-family: 'Poppins', sans-serif !important;
+            font-size: 0.88rem !important;
+            font-weight: 500 !important;
+            padding: 0.55rem 1.15rem !important;
+            border-radius: 8px !important;
+            color: #94a3b8 !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            transition: all 0.15s ease-in-out !important;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #f8fafc !important;
+            background-color: rgba(255, 255, 255, 0.04) !important;
+        }
+        .stTabs [aria-selected="true"] {
+            background: rgba(99, 102, 241, 0.16) !important;
+            color: #f8fafc !important;
+            font-weight: 600 !important;
+            border: 1px solid rgba(99, 102, 241, 0.38) !important;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        /* 6. Dense Technical Metric Cards */
+        [data-testid="stMetric"] {
+            background: #0e1424 !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 8px !important;
+            padding: 0.85rem 1.15rem !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
         }
         [data-testid="stMetricLabel"] {
             font-family: 'Poppins', sans-serif !important;
-            font-size: 0.75rem !important;
-            font-weight: 600 !important;
+            font-size: 0.74rem !important;
+            font-weight: 500 !important;
             text-transform: uppercase !important;
-            letter-spacing: 0.04em !important;
+            letter-spacing: 0.05em !important;
             color: #64748b !important;
         }
         [data-testid="stMetricValue"] {
             font-family: 'JetBrains Mono', monospace !important;
-            font-size: 1.5rem !important;
-            font-weight: 700 !important;
+            font-size: 1.35rem !important;
+            font-weight: 600 !important;
+            color: #f8fafc !important;
             letter-spacing: -0.02em !important;
-            color: #0f172a !important;
         }
 
-        /* Navigation Tabs: Montserrat font with subtle pills */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 0.75rem;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 4px;
+        /* 7. Structured Technical Cards */
+        .idx-card {
+            background: #0e1424;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 1.25rem 1.35rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            transition: all 0.2s ease;
         }
-        .stTabs [data-baseweb="tab"] {
-            font-family: 'Montserrat', sans-serif !important;
-            font-size: 0.92rem !important;
+        .idx-card:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        }
+        .idx-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        .idx-card-title {
+            font-size: 0.96rem !important;
             font-weight: 600 !important;
-            letter-spacing: -0.01em !important;
-            padding: 0.45rem 0.9rem !important;
-            border-radius: 6px !important;
-            color: #475569 !important;
-            transition: all 0.15s ease-in-out;
+            color: #f8fafc !important;
+            margin: 0 !important;
         }
-        .stTabs [data-baseweb="tab"]:hover {
-            color: #0f172a !important;
-            background-color: #f1f5f9 !important;
+        .idx-card-desc {
+            font-size: 0.84rem !important;
+            color: #94a3b8 !important;
+            line-height: 1.6 !important;
+            margin: 0 0 0.75rem 0 !important;
         }
-        .stTabs [aria-selected="true"] {
-            background-color: #e0f2fe !important;
-            color: #0284c7 !important;
+        .idx-card-meta {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.74rem;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
         }
 
-        /* Buttons: Rounded with modern hover feel */
+        /* Pipeline Flow Grid (Multi-Stage Architecture Map) */
+        .idx-pipeline-grid {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 2rem;
+            overflow-x: auto;
+            padding: 0.2rem 0;
+        }
+        .idx-step-card {
+            background: #0d1322;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 0.8rem 1.1rem;
+            min-width: 155px;
+            flex: 1;
+        }
+        .idx-step-card-active {
+            border-color: rgba(16, 185, 129, 0.35);
+            background: rgba(16, 185, 129, 0.04);
+        }
+        .idx-step-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: #6366f1;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.2rem;
+        }
+        .idx-step-name {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #f8fafc;
+            white-space: nowrap;
+            margin-bottom: 0.15rem;
+        }
+        .idx-step-tech {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+        .idx-step-arrow {
+            color: #475569;
+            font-size: 1.1rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        /* 8. Modern Buttons (Solid Indigo / Minimal Border) */
         .stButton > button {
-            font-family: 'Poppins', sans-serif !important;
-            font-weight: 600 !important;
-            font-size: 0.9rem !important;
+            font-family: 'Inter', sans-serif !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
             border-radius: 6px !important;
             letter-spacing: -0.01em !important;
-            transition: all 0.15s ease;
+            background-color: #1e263c !important;
+            color: #f8fafc !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            padding: 0.45rem 0.95rem !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+            transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
         .stButton > button:hover {
+            background-color: #263352 !important;
+            border-color: rgba(99, 102, 241, 0.4) !important;
+            color: #ffffff !important;
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
+        }
+        .stButton > button:active {
+            transform: translateY(0);
         }
 
-        /* Form Inputs & Selects */
+        /* 9. Form Inputs */
         .stTextInput input, .stSelectbox [data-baseweb="select"], .stNumberInput input {
-            font-family: 'Poppins', sans-serif !important;
+            font-family: 'Inter', sans-serif !important;
             border-radius: 6px !important;
-            font-size: 0.9rem !important;
+            background: #0e1424 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #f8fafc !important;
+            font-size: 0.85rem !important;
+        }
+        .stTextInput input:focus, .stSelectbox [data-baseweb="select"]:focus {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
         }
 
-        /* Info & Callout Boxes */
-        .callout-disclaimer {
-            background-color: #f8fafc;
-            border-left: 3px solid #0284c7;
+        /* 10. Badges & Status Pills */
+        .badge-indigo {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(99, 102, 241, 0.12);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.26);
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .badge-emerald {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(16, 185, 129, 0.12);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.26);
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .badge-amber {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(245, 158, 11, 0.12);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.26);
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Callout / Disclaimer */
+        .idx-callout {
+            background: rgba(99, 102, 241, 0.06);
+            border-left: 2px solid #6366f1;
             padding: 0.75rem 1rem;
-            font-size: 0.88rem;
-            color: #334155;
+            font-size: 0.8rem;
+            color: #cbd5e1;
             border-radius: 0 6px 6px 0;
             margin-bottom: 1rem;
+            line-height: 1.5;
         }
 
-        /* Dark mode compatibility */
-        @media (prefers-color-scheme: dark) {
-            .sub-header {
-                color: #94a3b8 !important;
-            }
-            [data-testid="stMetric"] {
-                background: rgba(30, 41, 59, 0.6) !important;
-                border-color: #334155 !important;
-            }
-            [data-testid="stMetricLabel"] {
-                color: #94a3b8 !important;
-            }
-            [data-testid="stMetricValue"] {
-                color: #f8fafc !important;
-            }
-            .stTabs [data-baseweb="tab"] {
-                color: #94a3b8 !important;
-            }
-            .stTabs [data-baseweb="tab"]:hover {
-                color: #f8fafc !important;
-                background-color: #1e293b !important;
-            }
-            .stTabs [aria-selected="true"] {
-                background-color: rgba(2, 132, 199, 0.2) !important;
-                color: #38bdf8 !important;
-            }
-            .callout-disclaimer {
-                background-color: #1e293b;
-                color: #cbd5e1;
-            }
+        /* Dataframe styling */
+        [data-testid="stDataFrame"] {
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 6px !important;
+            overflow: hidden !important;
+            background: #0d1322 !important;
         }
         </style>
         """,
@@ -240,12 +540,7 @@ def _get_or_build_index(
     hnsw_m: int = 8,
     hnsw_ef_construction: int = 32,
 ) -> tuple[Any, float, bool]:
-    """Retrieve index from cache or build it if build-time parameters or dataset changed.
-
-    Separates build-time hyperparameters (e.g. nlist, M, ef_construction) from
-    query-time exploration parameters (e.g. nprobe, ef_search) to prevent expensive
-    re-indexing on ordinary UI rerenders.
-    """
+    """Retrieve index from cache or build it if build-time parameters or dataset changed."""
     if index_type == "Exact Flat (Reference)":
         build_params: dict[str, Any] = {}
         builder = lambda: ExactFlatIndex(database=ds.base, ids=ds.base_ids)
@@ -254,12 +549,27 @@ def _get_or_build_index(
         builder = lambda: ExactBlasIndex(database=ds.base, ids=ds.base_ids)
     elif index_type == "IVF-Flat":
         build_params = {"nlist": ivf_nlist}
-        builder = lambda: IVFFlatIndex(database=ds.base, ids=ds.base_ids, nlist=ivf_nlist)
+        builder = lambda: IVFFlatIndex(
+            database=ds.base,
+            ids=ds.base_ids,
+            nlist=ivf_nlist,
+            nprobe=1,
+            distance_method="blas",
+            seed=ds.seed,
+        )
     elif index_type == "IVF-PQ":
         build_params = {"nlist": ivf_nlist, "M": pq_m, "k_sub": pq_ksub}
-        builder = lambda: IVFPQIndex(database=ds.base, ids=ds.base_ids, nlist=ivf_nlist, M=pq_m, k_sub=pq_ksub)
+        builder = lambda: IVFPQIndex(
+            database=ds.base,
+            ids=ds.base_ids,
+            nlist=ivf_nlist,
+            M=pq_m,
+            k_sub=pq_ksub,
+            nprobe=1,
+            seed=ds.seed,
+        )
     elif index_type == "HNSW":
-        build_params = {"M": hnsw_m, "ef_construction": hnsw_ef_construction, "seed": ds.seed}
+        build_params = {"M": hnsw_m, "ef_construction": hnsw_ef_construction}
         builder = lambda: HNSWIndex(
             database=ds.base,
             ids=ds.base_ids,
@@ -276,7 +586,7 @@ def _get_or_build_index(
 
 def main() -> None:
     st.set_page_config(
-        page_title="Indexora — Interactive Index Lab",
+        page_title="Indexora — Vector Search Engine",
         page_icon="⚡",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -285,11 +595,33 @@ def main() -> None:
     _init_session_state()
 
     # -------------------------------------------------------------------------
-    # Sidebar: Dataset Generator Controls
+    # Header Banner (Linear/Vercel App Shell Header)
+    # -------------------------------------------------------------------------
+    st.markdown(
+        """
+        <div class="idx-header">
+            <div class="idx-brand">
+                <div class="idx-logo-badge">⚡</div>
+                <div>
+                    <h1 class="idx-title">Indexora</h1>
+                    <p class="idx-tagline">Vector Search Engine & Interactive Lab</p>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap: 0.75rem;">
+                <span class="idx-status-pill">
+                    <span class="idx-status-dot"></span> Engine Online
+                </span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # -------------------------------------------------------------------------
+    # Sidebar: Lab Configuration & Dataset Status
     # -------------------------------------------------------------------------
     with st.sidebar:
-        st.header("⚡ Lab Configuration")
-        st.markdown("**Synthetic Clustered Dataset**")
+        st.markdown('<div class="sidebar-section-title">Environment & Dataset</div>', unsafe_allow_html=True)
 
         sb_n_base = st.slider("Base Vectors (N)", min_value=30, max_value=400, value=120, step=10)
         sb_d = st.slider("Dimensionality (d)", min_value=4, max_value=32, value=8, step=4)
@@ -312,43 +644,42 @@ def main() -> None:
             st.session_state.benchmark_results = None
             if "index_cache" in st.session_state:
                 st.session_state.index_cache.clear()
-            st.success("New synthetic dataset generated!")
+            st.success("Dataset regenerated!")
 
         st.markdown("---")
+        st.markdown('<div class="sidebar-section-title">Active Dataset State</div>', unsafe_allow_html=True)
         ds_curr: LabDataset = st.session_state.dataset
-        st.caption(
-            f"**Current Dataset Info:**\n"
-            f"- Base: `{ds_curr.N}` vectors\n"
-            f"- Queries: `{ds_curr.Q}` vectors\n"
-            f"- Dimension: `{ds_curr.d}`-D float32\n"
-            f"- Clusters: `{ds_curr.n_clusters}` centers\n"
-            f"- IDs: `[{ds_curr.base_ids[0]} ... {ds_curr.base_ids[-1]}]`"
+        st.markdown(
+            f"""
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: #94a3b8; line-height: 1.7; background: #080c16; padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
+                <div>Base Vectors: <span style="color:#f8fafc; font-weight:600;">{ds_curr.N}</span></div>
+                <div>Queries: <span style="color:#f8fafc; font-weight:600;">{ds_curr.Q}</span></div>
+                <div>Dimension: <span style="color:#f8fafc; font-weight:600;">{ds_curr.d}-D float32</span></div>
+                <div>Clusters: <span style="color:#f8fafc; font-weight:600;">{ds_curr.n_clusters}</span></div>
+                <div>ID Range: <span style="color:#f8fafc; font-weight:600;">[{ds_curr.base_ids[0]} ... {ds_curr.base_ids[-1]}]</span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         st.markdown(
             """
-            <div class="callout-disclaimer">
-            <strong>Data Disclosure:</strong> This lab uses synthetic numeric vector coordinates in ℝᵈ for index mechanics demonstration. It is <em>not</em> semantic text search or embedding retrieval.
+            <div class="idx-callout" style="margin-top: 1rem;">
+                <strong>Synthetic Demo Scope:</strong> Uses geometric coordinates in ℝᵈ for algorithm validation. Real text retrieval is active in Tab 5.
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     # -------------------------------------------------------------------------
-    # Header Banner
+    # Main Navigation: 5 Primary Product Tabs
     # -------------------------------------------------------------------------
-    st.markdown('<div class="main-header">⚡ Indexora — Interactive Index Lab</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="sub-header">Inspect, benchmark, and mutate vector index architectures from first principles.</div>',
-        unsafe_allow_html=True,
-    )
-
     tab_overview, tab_playground, tab_benchmark, tab_mutations, tab_semantic = st.tabs(
         [
-            "📘 Overview & Concepts",
-            "🔍 Search Playground",
-            "📊 Accuracy & Performance Lab",
-            "⚙️ Mutations & Persistence",
-            "📚 Semantic Text Search",
+            "Overview & Concepts",
+            "Search Playground",
+            "Accuracy & Benchmarks",
+            "Mutations & Persistence",
+            "Semantic Text Search",
         ]
     )
 
@@ -358,56 +689,151 @@ def main() -> None:
     # Tab 1: Overview & Concepts
     # =========================================================================
     with tab_overview:
-        st.subheader("Architecture Breakdown")
+        st.markdown("### Vector Index Architectures")
         st.markdown(
-            "Indexora implements foundational nearest-neighbor search algorithms directly in Python and NumPy. "
-            "Explore how each index partitions the vector space and trades accuracy for candidate evaluation speed:"
+            "Indexora implements foundational nearest-neighbor retrieval algorithms directly in Python and NumPy. "
+            "Examine how each architecture partitions the search space and balances candidate evaluation cost with recall guarantees:"
+        )
+
+        # Visual Retrieval Pipeline Flowchart
+        st.markdown(
+            """
+            <div class="idx-pipeline-grid">
+                <div class="idx-step-card">
+                    <div class="idx-step-num">STAGE 01</div>
+                    <div class="idx-step-name">Query Vector</div>
+                    <div class="idx-step-tech">q ∈ ℝ<sup>d</sup> (float32)</div>
+                </div>
+                <div class="idx-step-arrow">→</div>
+                <div class="idx-step-card">
+                    <div class="idx-step-num">STAGE 02</div>
+                    <div class="idx-step-name">Partitioning</div>
+                    <div class="idx-step-tech">Voronoi / Skip-Graph</div>
+                </div>
+                <div class="idx-step-arrow">→</div>
+                <div class="idx-step-card">
+                    <div class="idx-step-num">STAGE 03</div>
+                    <div class="idx-step-name">Candidate Scoring</div>
+                    <div class="idx-step-tech">BLAS GEMM / ADC LUT</div>
+                </div>
+                <div class="idx-step-arrow">→</div>
+                <div class="idx-step-card">
+                    <div class="idx-step-num">STAGE 04</div>
+                    <div class="idx-step-name">Top-k Ranking</div>
+                    <div class="idx-step-tech">Bounded Min-Heap</div>
+                </div>
+                <div class="idx-step-arrow">→</div>
+                <div class="idx-step-card idx-step-card-active">
+                    <div class="idx-step-num" style="color: #10b981;">STAGE 05</div>
+                    <div class="idx-step-name" style="color: #34d399;">Search Result</div>
+                    <div class="idx-step-tech" style="color: #6ee7b7;">SearchResult(ids, dists)</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(
                 """
-                ### 1. Exact Flat / Exact BLAS (Baseline)
-                - **Concept:** Brute-force exhaustive scan over all $N$ database vectors.
-                - **Complexity:** $O(N \cdot d)$ distance computations per query.
-                - **Guarantee:** 100% Recall@k. Serves as the correctness oracle.
-                - **BLAS Acceleration:** Exact BLAS evaluates $\|x - y\|^2 = \|x\|^2 + \|y\|^2 - 2(x \cdot y)$ via optimized matrix multiplication.
-                """
+                <div class="idx-card">
+                    <div class="idx-card-header">
+                        <div class="idx-card-title">1. Exact Flat / Exact BLAS</div>
+                        <span class="badge-emerald">100% Recall</span>
+                    </div>
+                    <div class="idx-card-desc">
+                        Brute-force exhaustive search evaluating every vector in the dataset. Serves as the mathematical correctness oracle.
+                    </div>
+                    <div class="idx-card-meta">
+                        <span>Complexity: <code>O(N · d)</code></span>
+                        <span>Kernel: <code>GEMM ||q-x||²</code></span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
             st.markdown(
                 """
-                ### 2. IVF-Flat (Inverted File Flat)
-                - **Concept:** Partitions vector space into `nlist` Voronoi cells using $k$-means clustering.
-                - **Query:** Ranks coarse centroids, probes only the nearest `nprobe` inverted posting lists.
-                - **Trade-off:** Evaluates a fraction of total vectors. Higher `nprobe` recovers lost boundary recall.
+                <div class="idx-card">
+                    <div class="idx-card-header">
+                        <div class="idx-card-title">2. IVF-Flat (Inverted File)</div>
+                        <span class="badge-indigo">Voronoi Partitioning</span>
+                    </div>
+                    <div class="idx-card-desc">
+                        Partitions database vectors into <code>nlist</code> centroids via <em>K</em>-means++. At query time, evaluates only the closest <code>nprobe</code> inverted posting lists.
+                    </div>
+                    <div class="idx-card-meta">
+                        <span>Complexity: <code>O(nprobe · N / nlist · d)</code></span>
+                        <span>Trade-off: High Recall / Low DC</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(
                 """
+                <div class="idx-card">
+                    <div class="idx-card-header">
+                        <div class="idx-card-title">3. Exact Reference Kernel</div>
+                        <span class="badge-amber">Precision Oracle</span>
+                    </div>
+                    <div class="idx-card-desc">
+                        Direct coordinate-by-coordinate differencing with float64 accumulation to guarantee numerical stability against catastrophic cancellation.
+                    </div>
+                    <div class="idx-card-meta">
+                        <span>Precision: <code>float64 accumulation</code></span>
+                        <span>Validation Oracle</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         with col2:
             st.markdown(
                 """
-                ### 3. IVF-PQ (Product Quantization)
-                - **Concept:** Decomposes $d$-dimensional space into $M$ orthogonal subspaces. Quantizes residuals into compact `uint8` codes.
-                - **Query:** Asymmetric Distance Computation (ADC) builds a small lookup table (LUT) and scores candidates in microseconds.
-                - **Trade-off:** Compresses memory up to 16x. Distances are quantized approximations.
-                """
+                <div class="idx-card">
+                    <div class="idx-card-header">
+                        <div class="idx-card-title">4. IVF-PQ (Product Quantization)</div>
+                        <span class="badge-indigo">15x–64x Compression</span>
+                    </div>
+                    <div class="idx-card-desc">
+                        Decomposes <em>d</em>-dimensional space into <em>M</em> orthogonal subspaces. Quantizes residuals into 8-bit codes and evaluates distances via Asymmetric Distance Computation (ADC) lookup tables.
+                    </div>
+                    <div class="idx-card-meta">
+                        <span>Complexity: <code>O(N_cand · M) LUT</code></span>
+                        <span>Footprint: <code>M bytes/vec</code></span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
             st.markdown(
                 """
-                ### 4. HNSW (Hierarchical Navigable Small World)
-                - **Concept:** Multi-layer proximity graph with exponential level decay.
-                - **Query:** Logarithmic greedy skip-list routing on upper layers, bounded beam search at layer 0.
-                - **Trade-off:** High recall with very few distance evaluations (~15% of database).
-                """
+                <div class="idx-card">
+                    <div class="idx-card-header">
+                        <div class="idx-card-title">5. HNSW (Hierarchical Small World)</div>
+                        <span class="badge-emerald">Ultra-Low Latency</span>
+                    </div>
+                    <div class="idx-card-desc">
+                        Multi-layer proximity graph with exponential level decay and Algorithm 4 diversity neighbor selection. Navigates logarithmic expressways on upper layers and performs greedy beam search at layer 0.
+                    </div>
+                    <div class="idx-card-meta">
+                        <span>Complexity: <code>O(log N · d)</code></span>
+                        <span>Efficiency: ~15% Distance Ops</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         st.markdown("---")
-        st.subheader("Current Dataset Distribution Preview")
+        st.markdown("#### Live Dataset Vector Distribution Sample")
         df_preview = pd.DataFrame(
             ds.base[:8],
-            columns=[f"dim_{i}" for i in range(ds.d)],
-            index=[f"ID {int(x)}" for x in ds.base_ids[:8]],
+            columns=[f"d{i}" for i in range(ds.d)],
+            index=[f"id_{int(x)}" for x in ds.base_ids[:8]],
         )
         st.dataframe(df_preview, use_container_width=True)
 
@@ -415,7 +841,8 @@ def main() -> None:
     # Tab 2: Search Playground
     # =========================================================================
     with tab_playground:
-        st.subheader("Interactive Query Search")
+        st.markdown("### Interactive Query Search")
+        st.markdown("Execute nearest-neighbor retrieval on live index instances with real-time ground truth validation.")
 
         c_idx, c_q, c_k = st.columns([1.5, 1.2, 1.0])
         with c_idx:
@@ -434,20 +861,20 @@ def main() -> None:
         nprobe_val = 2
         ef_search_val = 32
         if selected_index_name in ("IVF-Flat", "IVF-PQ"):
-            c_p1, c_p2 = st.columns(2)
+            c_p1, c_p2 = st.columns([1, 2])
             with c_p1:
                 nprobe_val = st.slider("nprobe (Probed Centroids)", min_value=1, max_value=4, value=2)
             with c_p2:
                 st.caption(f"Index built with `nlist=4`. Probing {nprobe_val}/4 Voronoi cells per query.")
         elif selected_index_name == "HNSW":
-            c_p1, c_p2 = st.columns(2)
+            c_p1, c_p2 = st.columns([1, 2])
             with c_p1:
                 ef_search_val = st.slider("ef_search (Beam Exploration Depth)", min_value=4, max_value=64, value=32, step=4)
             with c_p2:
                 st.caption(f"Layer 0 search explores candidate beam of size `ef={ef_search_val}`.")
 
         # Optional ID filter
-        with st.expander("🔎 Optional ID Eligibility Filter (filter_ids)"):
+        with st.expander("Filter Eligibility Settings (filter_ids)"):
             filter_mode = st.radio(
                 "Filter Preset",
                 ["None (All Vectors Eligible)", "Even IDs Only", "Exclude True Top-1 ID", "Custom ID List"],
@@ -494,7 +921,7 @@ def main() -> None:
         eligible_gt_ids = set(filtered_gt.ids.tolist())
         num_eligible_live = len(eligible_gt_ids)
 
-        # Retrieve or Build Index from Cache (separating build params from query params)
+        # Retrieve or Build Index from Cache
         idx_instance, build_time_ms, was_cached = _get_or_build_index(
             index_type=selected_index_name,
             ds=ds,
@@ -506,10 +933,8 @@ def main() -> None:
             hnsw_ef_construction=32,
         )
 
-        if was_cached:
-            st.caption(f"⚡ Reused cached index instance ({selected_index_name}).")
-        else:
-            st.caption(f"🔨 Built index ({selected_index_name}) in {build_time_ms:.2f} ms.")
+        build_note = f"⚡ Reused cached index ({selected_index_name})" if was_cached else f"🔨 Built index in {build_time_ms:.2f} ms"
+        st.markdown(f'<div style="font-size:0.78rem; color:#64748b; margin-bottom:0.75rem; font-family:\'JetBrains Mono\';">{build_note}</div>', unsafe_allow_html=True)
 
         # Execute Search with Query-Time Parameters
         t_start = time.perf_counter()
@@ -537,7 +962,7 @@ def main() -> None:
                 match_label = "100.0% (Empty Filter Set)" if len(retrieved_ids) == 0 else "0.0%"
             else:
                 match_label = f"{(hits / num_eligible_live) * 100.0:.1f}% ({hits}/{num_eligible_live})"
-            st.metric("Filtered Exact Match Rate", match_label)
+            st.metric("Filtered Exact Match", match_label)
         with m4:
             st.metric("Retrieved Candidates", f"{len(search_res.ids)} / {k_val}")
 
@@ -545,9 +970,9 @@ def main() -> None:
         st.markdown("#### Retrieved Nearest Neighbors")
         if len(search_res.ids) == 0:
             if num_eligible_live == 0:
-                st.info("ℹ️ Filter restriction resulted in 0 eligible database vectors. Empty result correctly matches filtered ground truth.")
+                st.info("Filter restriction resulted in 0 eligible database vectors. Empty result correctly matches filtered ground truth.")
             else:
-                st.warning("No eligible candidates retrieved by the index matching the query and filter criteria.")
+                st.warning("No eligible candidates retrieved matching the query and filter criteria.")
         else:
             table_rows = []
             for rank_i, (dist_val, id_val) in enumerate(zip(search_res.distances, search_res.ids), start=1):
@@ -555,28 +980,28 @@ def main() -> None:
                 table_rows.append({
                     "Rank": rank_i,
                     "External ID": int(id_val),
-                    "Squared L2 Distance (||q - x||²)": f"{dist_val:.5f}",
-                    "Filtered Ground Truth Status": "✅ Exact Match" if is_exact_match else "⚡ Approximation",
+                    "Squared L2 (||q-x||²)": f"{dist_val:.5f}",
+                    "Ground Truth Status": "Exact Match" if is_exact_match else "Approximation",
                 })
             st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
 
-        # 2D PCA Visualization
-        st.markdown("#### 2D PCA Projection Visualizer")
-        st.caption(
-            "Visualizing the synthetic vector distribution projected to 2D via deterministic SVD PCA. "
-            "Note: Distances on this 2D plane can be visually distorted relative to true ℝᵈ squared-L2 distances."
-        )
+        # 2D PCA Visualization (Dark Technical Palette)
+        st.markdown("#### 2D Spatial Projection (PCA)")
+        st.caption("Dimensionality reduction via deterministic SVD PCA. Illustrates candidate proximity and cluster assignment.")
 
-        fig, ax = plt.subplots(figsize=(9, 5))
+        fig, ax = plt.subplots(figsize=(9, 4.4), facecolor="#090d16")
+        ax.set_facecolor("#0d1322")
+
         # 1. Base vectors
         base_proj = ds.project_2d(ds.base)
-        scatter = ax.scatter(
+        ax.scatter(
             base_proj[:, 0],
             base_proj[:, 1],
             c=ds.cluster_labels,
             cmap="viridis",
-            alpha=0.45,
-            s=40,
+            alpha=0.55,
+            s=42,
+            edgecolors="none",
             label="Database Vectors",
         )
 
@@ -585,11 +1010,13 @@ def main() -> None:
         ax.scatter(
             q_proj[0],
             q_proj[1],
-            color="red",
+            color="#f43f5e",
+            edgecolors="#ffffff",
+            linewidths=1.5,
             marker="*",
-            s=220,
+            s=240,
             zorder=10,
-            label="Query Point",
+            label="Query Vector",
         )
 
         # 3. Retrieved neighbors
@@ -601,26 +1028,32 @@ def main() -> None:
                     base_proj[retrieved_indices, 0],
                     base_proj[retrieved_indices, 1],
                     facecolors="none",
-                    edgecolors="crimson",
-                    s=140,
+                    edgecolors="#38bdf8",
+                    s=170,
                     linewidths=2.0,
                     zorder=9,
-                    label="Retrieved Nearest Neighbors",
+                    label="Retrieved Neighbors",
                 )
                 for rank_i, r_idx in enumerate(retrieved_indices, start=1):
                     ax.annotate(
                         f"#{rank_i}",
                         (base_proj[r_idx, 0] + 0.05, base_proj[r_idx, 1] + 0.05),
-                        fontsize=9,
+                        fontsize=8.5,
                         fontweight="bold",
-                        color="#991b1b",
+                        color="#38bdf8",
                     )
 
-        ax.set_title(f"2D PCA Map — {selected_index_name} Search (Top-{k_val})", fontsize=11, fontweight="bold")
-        ax.set_xlabel("Principal Component 1", fontsize=9)
-        ax.set_ylabel("Principal Component 2", fontsize=9)
-        ax.grid(True, linestyle="--", alpha=0.4)
-        ax.legend(loc="upper right", fontsize=8)
+        ax.set_title(f"2D Projection: {selected_index_name} (Top-{k_val})", fontsize=10, fontweight="600", color="#f8fafc", pad=10)
+        ax.set_xlabel("PC 1", fontsize=8.5, color="#94a3b8")
+        ax.set_ylabel("PC 2", fontsize=8.5, color="#94a3b8")
+        ax.tick_params(colors="#94a3b8", labelsize=7.5)
+        for spine in ax.spines.values():
+            spine.set_color((1.0, 1.0, 1.0, 0.12))
+        ax.grid(True, linestyle="--", alpha=0.15, color="#ffffff")
+        legend = ax.legend(loc="upper right", fontsize=7.5, facecolor="#0d1322", edgecolor=(1.0, 1.0, 1.0, 0.15))
+        for text in legend.get_texts():
+            text.set_color("#cbd5e1")
+        fig.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
 
@@ -628,16 +1061,16 @@ def main() -> None:
     # Tab 3: Accuracy & Performance Lab
     # =========================================================================
     with tab_benchmark:
-        st.subheader("Accuracy vs. Speed Benchmark Sweep")
+        st.markdown("### Accuracy vs. Speed Benchmark Sweep")
         st.markdown(
-            "Compare all 5 core Indexora implementations on identical query vectors under the same top-$k$. "
-            "Examines the trade-offs among build cost, query latency percentiles, throughput (QPS), and Recall@k."
+            "Execute an empirical sweep comparing all 5 index implementations on identical queries with "
+            "deterministic ground-truth verification."
         )
 
         b_k = st.slider("Benchmark Top-k", min_value=1, max_value=min(ds.N, 20), value=5, key="bench_k")
 
         if st.button("🚀 Run Comparative Benchmark", use_container_width=True):
-            with st.spinner("Executing comparative benchmark across all 5 index implementations..."):
+            with st.spinner("Benchmarking 5 index architectures..."):
                 gt = ds.get_ground_truth(k=b_k)
                 bench_configs = [
                     ("Exact BLAS", lambda: ExactBlasIndex(database=ds.base, ids=ds.base_ids), {}),
@@ -689,61 +1122,109 @@ def main() -> None:
             ]
             st.dataframe(pd.DataFrame(summary_table), use_container_width=True)
 
-            # Charts
+            # Polished Dark Charts
             c_c1, c_c2 = st.columns(2)
             with c_c1:
                 st.markdown("#### Recall@k vs. Median Latency")
-                fig1, ax1 = plt.subplots(figsize=(6, 4))
+                fig1, ax1 = plt.subplots(figsize=(6, 3.6), facecolor="#090d16")
+                ax1.set_facecolor("#0d1322")
+
+                fam_meta = {
+                    "Exact": {"color": "#10b981", "marker": "o", "label": "Exact (Flat / BLAS)"},
+                    "IVF-Flat": {"color": "#38bdf8", "marker": "s", "label": "IVF-Flat"},
+                    "IVF-PQ": {"color": "#f59e0b", "marker": "^", "label": "IVF-PQ"},
+                    "HNSW": {"color": "#a855f7", "marker": "D", "label": "HNSW"},
+                }
+
+                rendered_fams: set[str] = set()
                 for r in bench_data:
-                    ax1.scatter(r.median_latency_ms, r.recall_at_k, s=120, alpha=0.85)
-                    ax1.annotate(r.index_name, (r.median_latency_ms, r.recall_at_k + 0.015), fontsize=8)
-                ax1.set_xlabel("Median Query Latency (ms)", fontsize=9)
-                ax1.set_ylabel("Recall@k", fontsize=9)
+                    if "Exact" in r.index_name:
+                        fam = "Exact"
+                    elif "IVF-Flat" in r.index_name:
+                        fam = "IVF-Flat"
+                    elif "IVF-PQ" in r.index_name:
+                        fam = "IVF-PQ"
+                    else:
+                        fam = "HNSW"
+
+                    cfg = fam_meta[fam]
+                    plot_label = cfg["label"] if fam not in rendered_fams else None
+                    rendered_fams.add(fam)
+
+                    ax1.scatter(
+                        r.median_latency_ms,
+                        r.recall_at_k,
+                        color=cfg["color"],
+                        marker=cfg["marker"],
+                        s=95,
+                        alpha=0.9,
+                        edgecolors="#ffffff",
+                        linewidths=1.0,
+                        label=plot_label,
+                        zorder=5,
+                    )
+
+                ax1.set_xlabel("Median Query Latency (ms)", fontsize=8.5, color="#94a3b8")
+                ax1.set_ylabel("Recall@k", fontsize=8.5, color="#94a3b8")
                 ax1.set_ylim(-0.05, 1.15)
-                ax1.grid(True, linestyle="--", alpha=0.5)
-                ax1.set_title("Recall vs. Latency Trade-Off", fontsize=10, fontweight="bold")
+                ax1.tick_params(colors="#94a3b8", labelsize=7.5)
+                for spine in ax1.spines.values():
+                    spine.set_color((1.0, 1.0, 1.0, 0.12))
+                ax1.grid(True, linestyle="--", alpha=0.15, color="#ffffff")
+                ax1.legend(loc="lower right", fontsize=7.5, facecolor="#0d1322", edgecolor=(1.0, 1.0, 1.0, 0.15), labelcolor="#cbd5e1")
+                fig1.tight_layout()
                 st.pyplot(fig1)
                 plt.close(fig1)
 
             with c_c2:
-                st.markdown("#### Distance Computations per Query")
-                fig2, ax2 = plt.subplots(figsize=(6, 4))
+                st.markdown("#### Candidate Evaluations per Query")
+                fig2, ax2 = plt.subplots(figsize=(6, 3.6), facecolor="#090d16")
+                ax2.set_facecolor("#0d1322")
                 names = [r.index_name for r in bench_data if r.distance_computations_per_query is not None]
                 dcs = [r.distance_computations_per_query for r in bench_data if r.distance_computations_per_query is not None]
+
+                bar_colors = []
+                for n in names:
+                    if "Exact" in n:
+                        bar_colors.append("#10b981")
+                    elif "IVF-Flat" in n:
+                        bar_colors.append("#38bdf8")
+                    elif "IVF-PQ" in n:
+                        bar_colors.append("#f59e0b")
+                    else:
+                        bar_colors.append("#a855f7")
+
                 y_pos = np.arange(len(names))
-                ax2.barh(y_pos, dcs, color="#3b82f6", alpha=0.8)
+                bars = ax2.barh(y_pos, dcs, color=bar_colors, alpha=0.85, height=0.62)
                 ax2.set_yticks(y_pos)
-                ax2.set_yticklabels(names, fontsize=8)
+                ax2.set_yticklabels(names, fontsize=7.5, color="#cbd5e1")
                 ax2.invert_yaxis()
-                ax2.set_xlabel("Average Distance Computations per Query", fontsize=9)
-                ax2.grid(True, axis="x", linestyle="--", alpha=0.5)
-                ax2.set_title("Candidate Evaluation Efficiency", fontsize=10, fontweight="bold")
+                ax2.set_xlabel("Mean Distance Operations / Query", fontsize=8.5, color="#94a3b8")
+                ax2.tick_params(colors="#94a3b8", labelsize=7.5)
+                for spine in ax2.spines.values():
+                    spine.set_color((1.0, 1.0, 1.0, 0.12))
+                ax2.grid(True, axis="x", linestyle="--", alpha=0.15, color="#ffffff")
+                fig2.tight_layout()
                 st.pyplot(fig2)
                 plt.close(fig2)
 
-            st.info(
-                "💡 **Performance & Scalability Insights:**\n\n"
-                "- **Small-Scale Overheads:** On small synthetic datasets (e.g. $N \\approx 120$), Exact BLAS often "
-                "reports lower query latency than HNSW or IVF because BLAS matrix multiplication runs in optimized, "
-                "compiled C/Fortran libraries, whereas Python-level graph traversals and Voronoi cell lookups incur "
-                "interpreter loop overhead.\n"
-                "- **Algorithmic vs. Wall-Clock Trade-Offs:** While HNSW ($O(\\log N)$ graph exploration) and IVF "
-                "(Voronoi candidate pruning) evaluate significantly fewer vector distances per query, wall-clock "
-                "speedups depend heavily on vector dimensionality, clustering quality, target recall ($k$, `nprobe`, "
-                "`ef_search`), BLAS multi-threading, and implementation language overhead.\n"
-                "- **Evidence-Based Evaluation:** Rather than assuming asymptotic speedups at any fixed dataset size, "
-                "use Indexora's offline benchmark harness (`python -m indexora.benchmark`) to measure empirical "
-                "recall-vs-latency curves for your specific hardware and workload."
+            st.markdown(
+                """
+                <div class="idx-callout">
+                    <strong>Systems Insight:</strong> On small synthetic datasets (e.g. N=120), BLAS exact scan can report lower wall-clock latency than HNSW or IVF because Level-3 GEMM runs in optimized C/Fortran libraries, whereas Python-level graph traversals incur bytecode interpreter overhead. Approximate methods prove their throughput advantage at scale (N ≥ 50,000).
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
     # =========================================================================
-    # Tab 4: Mutations & Persistence (Phase 11 Lab)
+    # Tab 4: Mutations & Persistence (Admin Console Feel)
     # =========================================================================
     with tab_mutations:
-        st.subheader("Index Mutations & Atomic Persistence Playground")
+        st.markdown("### Database Administration & Storage Console")
         st.markdown(
-            "Test Indexora Phase 11 features: dynamically add new vectors with external IDs, tombstone/delete "
-            "items, verify search exclusion, and persist the index to disk with SHA-256 integrity checks."
+            "Manage real-time vector mutations (incremental additions, tombstone deletions) and execute "
+            "atomic disk persistence with SHA-256 integrity validation."
         )
 
         session: LabSession = st.session_state.lab_session
@@ -763,98 +1244,118 @@ def main() -> None:
 
         # Section 1: Add Vector
         with m_col1:
-            st.markdown("#### 1. Incrementally Add Vector (`add`)")
+            st.markdown(
+                """
+                <div class="idx-card">
+                    <div class="idx-card-title">➕ Incremental Mutation (add)</div>
+                    <div class="idx-card-desc">Insert a new vector with a durable external entity ID into the active index.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             add_id = st.number_input("External ID to assign:", min_value=1, max_value=999999, value=9999, step=1)
             add_val = st.slider("Vector Constant Value (fills d dimensions):", min_value=-5.0, max_value=5.0, value=3.5, step=0.5)
 
-            if st.button("➕ Add Vector to Index", use_container_width=True):
+            if st.button("Commit Vector Addition", use_container_width=True):
                 vec_to_add = np.full(session.d, add_val, dtype=np.float32)
                 try:
                     assigned = session.add_vector(vec_to_add, ext_id=int(add_id))
-                    st.success(f"Successfully added vector with ID `{assigned}`. Active count is now `{session.active_count}`.")
+                    st.success(f"Committed vector ID {assigned}. Active searchable records: {session.active_count}")
                 except Exception as exc:
-                    st.error(f"Failed to add vector: {exc}")
+                    st.error(f"Addition rejected: {exc}")
 
         # Section 2: Delete Vector
         with m_col2:
-            st.markdown("#### 2. Delete Vector (`delete`)")
+            st.markdown(
+                """
+                <div class="idx-card">
+                    <div class="idx-card-title">🗑️ Tombstone Deletion (delete)</div>
+                    <div class="idx-card-desc">Logically tombstone a vector ID to exclude it from search while preserving routing invariants.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             del_id = st.number_input("External ID to delete:", min_value=1, max_value=999999, value=int(add_id), step=1)
 
-            if st.button("🗑️ Delete Vector from Index", use_container_width=True):
+            if st.button("Commit Tombstone Deletion", use_container_width=True):
                 try:
                     del_cnt = session.delete_vector(int(del_id))
                     if del_cnt > 0:
-                        st.success(f"Successfully deleted ID `{del_id}` (1 item removed). Active count is now `{session.active_count}`.")
+                        st.success(f"Tombstoned ID {del_id}. Searchable records remaining: {session.active_count}")
                     else:
-                        st.warning(f"ID `{del_id}` was not found in the active index (0 deleted).")
+                        st.warning(f"ID {del_id} not found in active live set.")
                 except Exception as exc:
-                    st.error(f"Failed to delete vector: {exc}")
+                    st.error(f"Deletion failed: {exc}")
 
         st.markdown("---")
-        st.markdown("#### 3. Atomic Disk Persistence (`save_index` / `load_index`)")
+        st.markdown("#### Atomic Persistence Engine (`save_index` / `load_index`)")
         st.markdown(
-            "Persists index hyperparameters and numerical array weights to disk without Python pickle. "
-            "Generates a versioned `manifest.json` with streaming SHA-256 file checksums."
+            "Serializes numerical array weights to pickle-free `.npy` files and generates a versioned "
+            "`manifest.json` with streaming SHA-256 file digests."
         )
 
         p_col1, p_col2 = st.columns(2)
         demo_save_dir = Path("demo_indexes/lab_session")
 
         with p_col1:
-            st.markdown("**Save Active Index**")
+            st.markdown("**Save Active Index State**")
             save_path_str = st.text_input("Target Directory:", value=str(demo_save_dir))
-            if st.button("💾 Save Index to Disk", use_container_width=True):
+            if st.button("💾 Write to Storage", use_container_width=True):
                 try:
                     target_p = Path(save_path_str)
                     manifest_data = session.save(target_p, overwrite=True)
-                    st.success(f"Index successfully saved to `{target_p}`!")
+                    st.success(f"Storage committed to `{target_p}`")
                     st.json(manifest_data)
                 except Exception as exc:
                     st.error(f"Save failed: {exc}")
 
         with p_col2:
-            st.markdown("**Restore Saved Index**")
+            st.markdown("**Restore & Validate Checksums**")
             load_path_str = st.text_input("Source Directory:", value=str(demo_save_dir), key="load_dir")
-            if st.button("📂 Load & Verify Index", use_container_width=True):
+            if st.button("📂 Load & Verify Storage", use_container_width=True):
                 try:
                     source_p = Path(load_path_str)
                     restored_idx = session.load(source_p, verify_checksums=True)
-                    st.success(f"Successfully restored `{type(restored_idx).__name__}` with full SHA-256 verification!")
+                    st.success(f"Successfully verified and loaded `{type(restored_idx).__name__}`!")
 
                     # Verification query
                     q_test = np.zeros(session.d, dtype=np.float32)
                     v_res = session.search(q_test, k=3)
-                    st.info(f"Test query on restored index returned top-3 IDs: `{v_res.ids.tolist()}`.")
+                    st.info(f"Verification query on restored index returned top-3 IDs: `{v_res.ids.tolist()}`")
                 except Exception as exc:
-                    st.error(f"Load failed: {exc}")
+                    st.error(f"Load verification failed: {exc}")
 
     # =========================================================================
-    # Tab 5: Semantic Text Search (Phase 12B)
+    # Tab 5: Semantic Text Search (Product Quality)
     # =========================================================================
     with tab_semantic:
-        st.subheader("📚 End-to-End Semantic Text Search")
+        st.markdown("### Natural Language Semantic Retrieval")
         st.markdown(
-            "Query a curated corpus of 25 technical engineering documents using dense sentence embeddings "
-            "and Indexora's native vector retrieval engines (**Exact BLAS**, **IVF-Flat**, and **HNSW**)."
+            "Search across a curated technical corpus of 25 engineering documents using dense sentence embeddings "
+            "and Indexora's native vector engines (**Exact BLAS**, **IVF-Flat**, and **HNSW**)."
         )
 
         has_st = is_sentence_transformers_available()
-        use_mock = False
-
-        if not has_st:
-            st.warning(
-                "⚠️ **Optional Semantic Dependencies Not Found**\n\n"
-                "Install `sentence-transformers` and `torch` to enable pretrained neural embeddings:\n\n"
-                "```bash\n"
-                "pip install -e \".[semantic]\"\n"
-                "```\n\n"
-                "You can still explore the retrieval pipeline using deterministic offline mock embeddings."
+        
+        if has_st:
+            mode_choice = st.radio(
+                "Embedding Pipeline:",
+                options=["Neural Pretrained (MiniLM-L6-v2, 384-D)", "Offline Mock (Deterministic Hash, 64-D)"],
+                horizontal=True,
+                help="Neural mode downloads real sentence-transformers weights; Offline mock runs zero-dependency hash projections.",
             )
-            use_mock = st.checkbox("Enable offline mock embeddings", value=True)
-            if not use_mock:
-                st.stop()
+            use_mock = "Mock" in mode_choice
         else:
-            st.success("✅ `sentence-transformers` active. Using pretrained model `all-MiniLM-L6-v2` (384 dimensions, L2-normalized).")
+            use_mock = True
+            st.markdown(
+                """
+                <div class="idx-callout" style="margin-bottom: 1rem;">
+                    <strong>Offline Mock Mode Active:</strong> Neural sentence-transformers dependencies not detected. 
+                    Running with deterministic 64-D mock projections. To enable real pretrained embeddings: <code>pip install -e ".[semantic]"</code>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         corpus_docs = load_demo_corpus()
 
@@ -866,8 +1367,14 @@ def main() -> None:
                 if use_mock:
                     st.session_state[embed_cache_key] = mock_embed_texts(texts, dim=64)
                 else:
-                    from indexora.semantic import encode_texts
-                    st.session_state[embed_cache_key] = encode_texts(texts, normalize=True)
+                    try:
+                        from indexora.semantic import encode_texts
+                        st.session_state[embed_cache_key] = encode_texts(texts, normalize=True)
+                    except Exception as exc:
+                        st.warning(f"Neural model initialization failed ({exc}). Gracefully falling back to deterministic offline mock embeddings.")
+                        st.session_state["semantic_doc_embeddings_mock"] = mock_embed_texts(texts, dim=64)
+                        embed_cache_key = "semantic_doc_embeddings_mock"
+                        use_mock = True
 
         cached_embeddings = st.session_state[embed_cache_key]
 
@@ -892,7 +1399,7 @@ def main() -> None:
         if sem_index_choice == "IVF-Flat":
             sem_nprobe = st.slider("IVF Probed Centroids (`nprobe`):", min_value=1, max_value=4, value=2, step=1)
         elif sem_index_choice == "HNSW":
-            sem_ef = st.slider("HNSW Query Exploration Depth (`ef_search`):", min_value=8, max_value=64, value=32, step=8)
+            sem_ef = st.slider("HNSW Exploration Depth (`ef_search`):", min_value=8, max_value=64, value=32, step=8)
 
         # Build / retrieve engine
         embedder_fn = (lambda t: mock_embed_texts(t, dim=64)) if use_mock else None
@@ -910,7 +1417,7 @@ def main() -> None:
         )
 
         st.markdown("---")
-        st.markdown("#### Query Input")
+        st.markdown("#### Search Input")
 
         example_queries = [
             "How do attention mechanisms in language models work?",
@@ -924,11 +1431,11 @@ def main() -> None:
         preset_clicked: str | None = None
         for i, q_text in enumerate(example_queries):
             short_label = q_text.split()[0] + " " + q_text.split()[1] + "..."
-            if preset_cols[i].button(f"💡 {short_label}", key=f"ex_q_{i}", help=q_text, use_container_width=True):
+            if preset_cols[i].button(short_label, key=f"ex_q_{i}", help=q_text, use_container_width=True):
                 preset_clicked = q_text
 
         default_query_text = preset_clicked or "How do attention mechanisms in language models work?"
-        user_query = st.text_input("Enter natural language search query:", value=default_query_text)
+        user_query = st.text_input("Enter natural language query:", value=default_query_text)
 
         filter_category_val = None if selected_cat == "All Categories" else selected_cat
 
@@ -941,7 +1448,7 @@ def main() -> None:
                 ef_search=sem_ef,
             )
 
-            # Metrics row
+            # Metrics row with clear latency segregation
             m1, m2, m3, m4, m5 = st.columns(5)
             with m1:
                 st.metric("Total Latency", f"{result.latency_ms + result.embed_time_ms:.2f} ms")
@@ -956,7 +1463,7 @@ def main() -> None:
                 match_pct = (sum(result.is_exact_match) / len(result.is_exact_match) * 100) if result.is_exact_match else 0.0
                 st.metric("Exact Top-k Match", f"{match_pct:.0f}%")
 
-            st.markdown("#### Retrieved Documents")
+            st.markdown("#### Ranked Documents")
             if not result.retrieved_documents:
                 st.info("No documents found matching the query and category filter.")
             else:
@@ -965,33 +1472,42 @@ def main() -> None:
                     zip(result.retrieved_documents, result.distances, result.is_exact_match, cos_sims),
                     start=1,
                 ):
-                    match_badge = "🎯 Exact Match" if is_match else "⚡ Approximation"
-                    tags_badge = " ".join([f"`{t}`" for t in doc.metadata.get("tags", [])])
+                    match_badge = (
+                        '<span class="badge-emerald">Exact Match</span>'
+                        if is_match
+                        else '<span class="badge-indigo">Approximation</span>'
+                    )
+                    tags_html = " ".join([f'<code>{t}</code>' for t in doc.metadata.get("tags", [])])
 
-                    with st.container():
-                        st.markdown(
-                            f"**#{rank}. {doc.title}** &nbsp;•&nbsp; `{doc.category}` &nbsp;•&nbsp; "
-                            f"<span style='color: {'#22c55e' if is_match else '#f59e0b'}; font-weight: 600;'>{match_badge}</span>",
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(
-                            f"📐 **Squared L2 Distance:** `{dist:.4f}` &nbsp;|&nbsp; "
-                            f"**Cosine Similarity:** `{cos_sim:.4f}` &nbsp;|&nbsp; "
-                            f"**Document ID:** `{doc.doc_id}`"
-                        )
-                        st.markdown(f"> *{doc.text}*")
-                        if tags_badge:
-                            st.markdown(f"🏷️ Tags: {tags_badge}")
-                        st.markdown("---")
+                    st.markdown(
+                        f"""
+                        <div class="idx-card">
+                            <div class="idx-card-header">
+                                <div class="idx-card-title">#{rank}. {doc.title}</div>
+                                <div>{match_badge}</div>
+                            </div>
+                            <div class="idx-card-meta" style="margin-bottom: 0.5rem;">
+                                <span>Category: <strong style="color: #cbd5e1;">{doc.category}</strong></span>
+                                <span>Cosine Sim: <strong style="color: #38bdf8;">{cos_sim:.4f}</strong></span>
+                                <span>Squared L2: <strong style="color: #cbd5e1;">{dist:.4f}</strong></span>
+                                <span>Doc ID: <code>{doc.doc_id}</code></span>
+                            </div>
+                            <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 0.5rem; line-height: 1.5;">"{doc.text}"</p>
+                            <div style="font-size: 0.76rem; color: #64748b;">
+                                Tags: {tags_html}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-        st.markdown("#### Mathematical Equivalence: Squared Euclidean Distance & Cosine Similarity")
-        st.info(
-            "**Why Squared L2 Distance is used for Cosine Ranking:**\n\n"
-            "Because text embeddings are unit-normalized ($||q||_2 = ||x||_2 = 1$):\n\n"
-            "$$||q - x||^2 = ||q||^2 + ||x||^2 - 2(q \\cdot x) = 2 - 2 \\cos(q, x)$$\n\n"
-            "Thus, minimizing squared Euclidean distance $||q - x||^2 \\in [0, 4]$ directly maximizes "
-            "cosine similarity $\\cos(q, x) \\in [-1, 1]$. Indexora's native squared-L2 kernels, IVF centroids, "
-            "and HNSW graph exploration seamlessly execute cosine ranking with zero algorithm alterations."
+        st.markdown(
+            """
+            <div class="idx-callout" style="margin-top: 1.5rem;">
+                <strong>Mathematical Equivalence:</strong> Because text embeddings are unit-normalized (||q|| = ||x|| = 1), minimizing squared Euclidean distance ||q-x||² = 2 - 2·cos(q, x) strictly maximizes cosine similarity. Indexora's native squared-L2 kernels power cosine ranking with zero algorithm alterations.
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
 
