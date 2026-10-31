@@ -13,7 +13,9 @@ import {
   Sparkles,
   ArrowUpRight,
   Filter,
-  X
+  X,
+  RefreshCw,
+  Info
 } from 'lucide-react';
 
 const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
@@ -45,11 +47,16 @@ export const SemanticSearchView: React.FC = () => {
   const [corpusSearchTerm, setCorpusSearchTerm] = useState<string>('');
   const [expandedDocs, setExpandedDocs] = useState<Record<number, boolean>>({});
 
-  useEffect(() => {
+  const loadSemanticStatus = () => {
+    setLoadingStatus(true);
     fetchSemanticStatus()
       .then((data) => setStatus(data))
       .catch((err) => console.error(err))
       .finally(() => setLoadingStatus(false));
+  };
+
+  useEffect(() => {
+    loadSemanticStatus();
   }, []);
 
   const toggleExpand = (docId: number) => {
@@ -163,14 +170,24 @@ export const SemanticSearchView: React.FC = () => {
       {/* Real Semantic Search Form (When Available) */}
       {status?.available && (
         <form onSubmit={handleSearch} className="bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-4 transition-colors">
-          <div className="flex items-center justify-between border-b border-border pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-3 gap-2">
             <span className="font-heading font-bold text-xs uppercase tracking-wider text-graphite flex items-center gap-2">
               <Search className="w-4 h-4 text-accent" />
               Dense Semantic Query Formulation
             </span>
-            <span className="text-xs font-mono text-accent bg-accent/10 px-2 py-0.5 rounded border border-accent/20">
-              Model: {status.model_name}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-accent bg-accent/10 px-2.5 py-0.5 rounded border border-accent/20 truncate max-w-[260px]" title={status.model_name}>
+                Model: {status.model_name}
+              </span>
+              <button
+                type="button"
+                onClick={loadSemanticStatus}
+                className="p-1.5 rounded border border-border bg-surface-subtle hover:bg-surface-secondary text-graphite cursor-pointer transition-colors"
+                title="Reload Semantic Status"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingStatus ? 'animate-spin text-accent' : ''}`} />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -290,10 +307,17 @@ export const SemanticSearchView: React.FC = () => {
       {result && (
         <div className="bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-4 transition-colors">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
-            <h3 className="font-heading font-bold text-sm text-graphite-dark">
-              Retrieved Documents ({result.ranked_documents.length} matches for "{result.query}")
-            </h3>
-            <div className="flex items-center gap-3 text-xs font-mono">
+            <div>
+              <h3 className="font-heading font-bold text-sm text-graphite-dark">
+                Retrieved Documents ({result.ranked_documents.length} matches for "{result.query}")
+              </h3>
+              {category !== 'all' && (
+                <span className="text-[11px] text-graphite-muted block">
+                  Domain Filter: <strong>{category}</strong> ({result.ranked_documents.length} matches in domain)
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2.5 text-xs font-mono flex-wrap">
               <span className="text-graphite">Total: {result.total_latency_ms.toFixed(2)} ms</span>
               <span className="text-graphite-subtle">·</span>
               <span className="text-accent">Embed: {result.text_embed_time_ms.toFixed(2)} ms</span>
@@ -302,42 +326,67 @@ export const SemanticSearchView: React.FC = () => {
             </div>
           </div>
 
-          <div className="space-y-3">
-            {result.ranked_documents.map((doc) => (
-              <div key={doc.doc_id} className="p-4 rounded-xl bg-surface-subtle border border-border space-y-2 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-accent/15 text-accent font-mono font-bold text-xs flex items-center justify-center">
-                      {doc.rank}
-                    </span>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-card border border-border text-graphite">
-                      {doc.category}
-                    </span>
-                    <h4 className="font-heading font-bold text-sm text-graphite-dark">
-                      {doc.title}
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs font-mono">
-                    <span className="text-accent font-bold">
-                      {(doc.cosine_similarity * 100).toFixed(1)}% Sim
-                    </span>
-                    <span className="text-graphite-muted">
-                      L2: {doc.squared_l2.toFixed(3)}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-xs text-graphite leading-relaxed">
-                  {doc.text}
-                </p>
-                <div className="flex items-center gap-1.5 pt-1">
-                  {doc.tags.map((tag) => (
-                    <span key={tag} className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-card text-graphite-muted border border-border">
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
+          {/* Low Relevance Query Explanation Banner */}
+          {result.ranked_documents.length > 0 && result.ranked_documents[0].cosine_similarity < 0.28 && (
+            <div className="p-3.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5">
+              <Info className="w-4 h-4 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+              <div>
+                <span className="font-semibold block">Low Semantic Overlap Notice</span>
+                <span className="text-[11px] leading-relaxed">
+                  Query "{result.query}" has low semantic proximity to this technical corpus (peak cosine similarity: {(result.ranked_documents[0].cosine_similarity * 100).toFixed(1)}%).
+                  These results represent the closest geometric vectors in 384-dimensional dense space.
+                </span>
               </div>
-            ))}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {result.ranked_documents.map((doc) => {
+              const simPct = Math.max(0, doc.cosine_similarity) * 100;
+              const isHigh = doc.cosine_similarity >= 0.50;
+              const isModerate = doc.cosine_similarity >= 0.28 && doc.cosine_similarity < 0.50;
+              return (
+                <div key={doc.doc_id} className="p-4 rounded-xl bg-surface-subtle border border-border space-y-2.5 transition-colors">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="w-5 h-5 rounded-full bg-accent/15 text-accent font-mono font-bold text-xs flex items-center justify-center flex-shrink-0">
+                        {doc.rank}
+                      </span>
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-card border border-border text-graphite flex-shrink-0">
+                        {doc.category}
+                      </span>
+                      <h4 className="font-heading font-bold text-sm text-graphite-dark">
+                        {doc.title}
+                      </h4>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-mono self-start sm:self-auto flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded border text-[11px] font-bold ${
+                        isHigh
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                          : isModerate
+                          ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20'
+                      }`}>
+                        {simPct.toFixed(1)}% {isHigh ? 'High Match' : isModerate ? 'Moderate' : 'Low Sim'}
+                      </span>
+                      <span className="text-graphite-muted text-[11px]">
+                        L2: {doc.squared_l2.toFixed(3)}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-graphite leading-relaxed">
+                    {doc.text}
+                  </p>
+                  <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                    {doc.tags.map((tag) => (
+                      <span key={tag} className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-card text-graphite-muted border border-border">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

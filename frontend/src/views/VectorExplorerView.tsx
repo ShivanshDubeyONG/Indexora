@@ -28,8 +28,13 @@ export const VectorExplorerView: React.FC<VectorExplorerViewProps> = ({ dataset 
   const loadProjection = async (qIndex: number) => {
     setLoading(true);
     setError(null);
+    const start = performance.now();
     try {
       const data = await fetchPcaProjection({ query_id_index: qIndex });
+      const elapsed = performance.now() - start;
+      if (elapsed < 350) {
+        await new Promise((r) => setTimeout(r, 350 - elapsed));
+      }
       setPcaData(data);
     } catch (err: any) {
       setError(err.message || 'Failed to compute PCA projection');

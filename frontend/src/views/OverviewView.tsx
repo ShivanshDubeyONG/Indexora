@@ -26,6 +26,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onNavigateToSearch
 }) => {
   const [selectedRecallAlgo, setSelectedRecallAlgo] = useState<'exact' | 'hnsw' | 'ivf' | 'pq'>('exact');
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncTelemetry = async () => {
+    setSyncing(true);
+    await onDatasetUpdated();
+    setTimeout(() => setSyncing(false), 450);
+  };
 
   const algorithmData = [
     { name: 'Exact BLAS', latency: 0.10, qps: 50169, recall: 1.0, memoryMb: 51.2, color: '#3182CE' },
@@ -69,11 +76,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         {/* Quick Actions */}
         <div className="flex items-center gap-2 self-start md:self-auto text-xs">
           <button
-            onClick={onDatasetUpdated}
-            className="px-3 py-1.5 rounded-lg border border-border bg-surface-subtle hover:bg-surface-secondary text-graphite font-medium transition cursor-pointer flex items-center gap-1.5"
+            onClick={handleSyncTelemetry}
+            disabled={syncing}
+            className="px-3 py-1.5 rounded-lg border border-border bg-surface-subtle hover:bg-surface-secondary text-graphite font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-70"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-graphite-muted" />
-            <span>Sync Telemetry</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-accent' : 'text-graphite-muted'}`} />
+            <span>{syncing ? 'Syncing...' : 'Sync Telemetry'}</span>
           </button>
         </div>
       </div>
@@ -108,7 +116,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
           {/* Calibrated Precision Technical Arc */}
           <div className="py-5 flex flex-col items-center justify-center">
-            <svg viewBox="0 0 260 140" className="w-full max-w-[260px]">
+            <svg viewBox="0 0 280 160" className="w-full max-w-[280px]">
               <defs>
                 <linearGradient id="precisionArcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="#2563EB" />
@@ -118,35 +126,35 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
               {/* Background Arc Track */}
               <path
-                d="M 30,125 A 90,90 0 0,1 230,125"
+                d="M 50,135 A 90,90 0 0,1 230,135"
                 fill="none"
                 stroke="currentColor"
                 className="text-slate-200 dark:text-slate-700/60"
-                strokeWidth="12"
+                strokeWidth="10"
                 strokeLinecap="round"
               />
 
               {/* Calibrated Active Meter Arc */}
               <path
-                d="M 30,125 A 90,90 0 0,1 230,125"
+                d="M 50,135 A 90,90 0 0,1 230,135"
                 fill="none"
                 stroke="url(#precisionArcGrad)"
-                strokeWidth="12"
+                strokeWidth="10"
                 strokeLinecap="round"
                 strokeDasharray="282.74"
                 strokeDashoffset={282.74 * (1 - (currentRecall.value / 100))}
                 className="transition-all duration-500 ease-out"
               />
 
-              {/* Calibration Tick Marks */}
+              {/* Calibration Outward Tick Marks */}
               {[0, 25, 50, 75, 100].map((tick) => {
                 const angle = Math.PI - (tick / 100) * Math.PI;
-                const rInner = 76;
-                const rOuter = 82;
-                const x1 = 130 + rInner * Math.cos(angle);
-                const y1 = 125 - rInner * Math.sin(angle);
-                const x2 = 130 + rOuter * Math.cos(angle);
-                const y2 = 125 - rOuter * Math.sin(angle);
+                const rInner = 97;
+                const rOuter = 104;
+                const x1 = 140 + rInner * Math.cos(angle);
+                const y1 = 135 - rInner * Math.sin(angle);
+                const x2 = 140 + rOuter * Math.cos(angle);
+                const y2 = 135 - rOuter * Math.sin(angle);
                 return (
                   <line
                     key={tick}
@@ -155,22 +163,22 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     x2={x2}
                     y2={y2}
                     stroke="currentColor"
-                    className="text-slate-400 dark:text-slate-500"
-                    strokeWidth={tick === 0 || tick === 100 ? 1.5 : 1}
+                    className="text-slate-300 dark:text-slate-600"
+                    strokeWidth={tick === 50 ? 1.5 : 1}
                   />
                 );
               })}
 
-              {/* Percentage Ticks */}
-              <text x="30" y="139" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">0%</text>
-              <text x="130" y="32" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">50%</text>
-              <text x="230" y="139" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">100%</text>
+              {/* Percentage Ticks with Generous Breathing Room */}
+              <text x="45" y="152" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">0%</text>
+              <text x="140" y="20" fontSize="10" fontFamily="monospace" fontWeight="600" fill="#94A3B8" textAnchor="middle">50%</text>
+              <text x="235" y="152" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">100%</text>
 
               {/* Digital Center Readout */}
-              <text x="130" y="105" fontSize="26" fontWeight="700" fontFamily="monospace" fill="currentColor" className="text-graphite-dark" textAnchor="middle">
+              <text x="140" y="110" fontSize="28" fontWeight="700" fontFamily="monospace" fill="currentColor" className="text-graphite-dark" textAnchor="middle">
                 {currentRecall.value.toFixed(1)}%
               </text>
-              <text x="130" y="120" fontSize="10" fontFamily="Inter" fill="#94A3B8" textAnchor="middle">
+              <text x="140" y="126" fontSize="10" fontFamily="Inter" fontWeight="600" fill="#94A3B8" letterSpacing="0.05em" textAnchor="middle">
                 RECALL@K
               </text>
             </svg>

@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   AlertCircle,
   HardDrive,
-  FileCode
+  FileCode,
+  RefreshCw
 } from 'lucide-react';
 
 interface IndexManagementViewProps {
@@ -51,8 +52,13 @@ export const IndexManagementView: React.FC<IndexManagementViewProps> = ({ status
 
   const refreshSavedList = async () => {
     setLoadingList(true);
+    const start = performance.now();
     try {
       const res = await listSavedIndexes();
+      const elapsed = performance.now() - start;
+      if (elapsed < 250) {
+        await new Promise((r) => setTimeout(r, 250 - elapsed));
+      }
       setSavedIndexes(res.saved_indexes);
       if (res.saved_indexes.length > 0 && !selectedLoadName) {
         setSelectedLoadName(res.saved_indexes[0]);
@@ -341,9 +347,20 @@ export const IndexManagementView: React.FC<IndexManagementViewProps> = ({ status
                 <FolderOpen className="w-4 h-4 text-accent" />
                 Restore Snapshot & Verify
               </span>
-              <span className="text-xs font-mono text-graphite-muted">
-                {savedIndexes.length} Found
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-graphite-muted">
+                  {savedIndexes.length} Found
+                </span>
+                <button
+                  type="button"
+                  onClick={refreshSavedList}
+                  disabled={loadingList}
+                  className="p-1 rounded border border-border bg-surface-subtle hover:bg-surface-secondary text-graphite cursor-pointer transition-colors"
+                  title="Refresh snapshot list"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? 'animate-spin text-accent' : ''}`} />
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleLoad} className="space-y-3 text-xs">

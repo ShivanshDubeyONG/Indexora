@@ -48,11 +48,16 @@ export const App: React.FC = () => {
 
   const loadState = async () => {
     setLoading(true);
+    const start = performance.now();
     try {
       const [s, d] = await Promise.all([
         fetchSystemStatus(),
         fetchCurrentDataset(),
       ]);
+      const elapsed = performance.now() - start;
+      if (elapsed < 350) {
+        await new Promise((r) => setTimeout(r, 350 - elapsed));
+      }
       setStatus(s);
       setDataset(d);
     } catch (err) {
