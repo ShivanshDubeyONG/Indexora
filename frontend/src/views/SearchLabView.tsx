@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { executeSearch } from '../api';
 import { SearchResponse, DatasetCurrent } from '../types';
-import { Search, Zap, CheckCircle, AlertTriangle, Filter, Clock, Hash } from 'lucide-react';
+import { Search, Zap, CheckCircle, AlertTriangle, Filter, Clock, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
 
 interface SearchLabViewProps {
   dataset: DatasetCurrent | null;
@@ -22,9 +22,15 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const runSearch = async () => {
+  // Execution Feedback State
+  const [evalTimestamp, setEvalTimestamp] = useState<string | null>(null);
+  const [evalFlash, setEvalFlash] = useState(false);
+  const [flashKey, setFlashKey] = useState(0);
+
+  const runSearch = async (isManual = false) => {
     setLoading(true);
     setError(null);
+    const startTime = performance.now();
     try {
       let customVec: number[] | undefined = undefined;
       if (useCustomVector && customVectorStr.trim()) {
@@ -48,7 +54,21 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
         filter_mode: filterMode,
         custom_filter_ids: customIds,
       });
+
+      // If user clicked the button manually, ensure at least 260ms of tactile feedback
+      // so the human eye registers the compute cycle instead of an imperceptible 0.1ms tick
+      if (isManual) {
+        const elapsed = performance.now() - startTime;
+        if (elapsed < 260) {
+          await new Promise((r) => setTimeout(r, 260 - elapsed));
+        }
+      }
+
       setResult(res);
+      setEvalTimestamp(new Date().toLocaleTimeString());
+      setEvalFlash(true);
+      setFlashKey((prev) => prev + 1);
+      setTimeout(() => setEvalFlash(false), 800);
     } catch (err: any) {
       setError(err.message || 'Search execution failed');
     } finally {
@@ -58,29 +78,47 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
 
   useEffect(() => {
     if (dataset) {
-      runSearch();
+      runSearch(false);
     }
   }, [indexType, queryIndex, k, nprobe, efSearch, filterMode]);
 
   return (
     <div className="space-y-8">
       {/* View Header */}
-      <div className="border-b border-border pb-4">
-        <h1 className="font-heading font-bold text-xl sm:text-2xl text-graphite-dark tracking-tight">
-          Interactive Query Retrieval Lab
-        </h1>
-        <p className="text-xs sm:text-sm text-graphite-muted mt-1">
-          Execute nearest-neighbor queries against live in-memory index structures with real-time ground-truth verification.
-        </p>
+      <div className="border-b border-border pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="font-heading font-bold text-xl sm:text-2xl text-graphite-dark tracking-tight">
+            Interactive Query Retrieval Lab
+          </h1>
+          <p className="text-xs sm:text-sm text-graphite-muted mt-1">
+            Execute nearest-neighbor queries against live in-memory index structures with real-time ground-truth verification.
+          </p>
+        </div>
+
+        {/* Live Execution Stamp */}
+        {evalTimestamp && (
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all duration-300 ${
+            evalFlash
+              ? 'bg-accent/15 border-accent text-accent shadow-glow scale-[1.02]'
+              : 'bg-surface-secondary border-border text-graphite-muted'
+          }`}>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Last compute: {evalTimestamp}</span>
+            <span className="text-graphite-subtle">·</span>
+            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+              {result?.latency_ms.toFixed(3)} ms
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Main Workspace Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Control Column (5 Cols) */}
-        <div className="lg:col-span-5 bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-5">
+        <div className="lg:col-span-5 bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-5 transition-colors">
           <div className="flex items-center justify-between border-b border-border pb-3">
             <span className="font-heading font-semibold text-sm text-graphite-dark">Query Configuration</span>
-            <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite">
+            <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite border border-border">
               d={dataset?.d || 8} float32
             </span>
           </div>
@@ -93,7 +131,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
             <select
               value={indexType}
               onChange={(e) => setIndexType(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-white text-graphite font-medium focus:border-accent focus:outline-none"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-surface-subtle text-graphite font-medium focus:border-accent focus:outline-none transition-colors"
             >
               <option value="Exact BLAS">Exact BLAS (Level-3 Matrix Kernel)</option>
               <option value="Exact Flat (Ref)">Exact Flat (Float64 Reference Oracle)</option>
@@ -122,13 +160,13 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 placeholder="e.g. 0.12, -0.45, 0.88, ..."
                 value={customVectorStr}
                 onChange={(e) => setCustomVectorStr(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-border bg-white text-graphite focus:border-accent focus:outline-none"
+                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-border bg-surface-subtle text-graphite focus:border-accent focus:outline-none transition-colors"
               />
             ) : (
               <select
                 value={queryIndex}
                 onChange={(e) => setQueryIndex(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-white text-graphite font-mono focus:border-accent focus:outline-none"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-surface-subtle text-graphite font-mono focus:border-accent focus:outline-none transition-colors"
               >
                 {dataset?.query_samples?.map((q, idx) => (
                   <option key={q.id} value={idx}>
@@ -152,7 +190,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 max={Math.min(dataset?.n_base || 100, 25)}
                 value={k}
                 onChange={(e) => setK(Number(e.target.value))}
-                className="w-full accent-accent"
+                className="w-full accent-accent cursor-pointer"
               />
             </div>
 
@@ -169,7 +207,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                   max={Math.max(2, dataset?.n_clusters || 4)}
                   value={nprobe}
                   onChange={(e) => setNprobe(Number(e.target.value))}
-                  className="w-full accent-accent"
+                  className="w-full accent-accent cursor-pointer"
                 />
                 <span className="text-[11px] text-graphite-muted mt-1 block">
                   Probing {nprobe} Voronoi cells per query.
@@ -191,7 +229,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                   step={8}
                   value={efSearch}
                   onChange={(e) => setEfSearch(Number(e.target.value))}
-                  className="w-full accent-accent"
+                  className="w-full accent-accent cursor-pointer"
                 />
                 <span className="text-[11px] text-graphite-muted mt-1 block">
                   Layer 0 priority queue candidate exploration beam.
@@ -210,8 +248,10 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
               <button
                 type="button"
                 onClick={() => setFilterMode('none')}
-                className={`py-1.5 px-2 rounded border text-left cursor-pointer transition ${
-                  filterMode === 'none' ? 'border-accent bg-surface-secondary text-accent font-semibold' : 'border-border bg-white text-graphite'
+                className={`py-1.5 px-2 rounded-lg border text-left cursor-pointer transition ${
+                  filterMode === 'none'
+                    ? 'border-accent bg-accent/10 text-accent font-semibold'
+                    : 'border-border bg-surface-subtle text-graphite hover:bg-surface-secondary'
                 }`}
               >
                 All Eligible
@@ -219,8 +259,10 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
               <button
                 type="button"
                 onClick={() => setFilterMode('even_ids')}
-                className={`py-1.5 px-2 rounded border text-left cursor-pointer transition ${
-                  filterMode === 'even_ids' ? 'border-accent bg-surface-secondary text-accent font-semibold' : 'border-border bg-white text-graphite'
+                className={`py-1.5 px-2 rounded-lg border text-left cursor-pointer transition ${
+                  filterMode === 'even_ids'
+                    ? 'border-accent bg-accent/10 text-accent font-semibold'
+                    : 'border-border bg-surface-subtle text-graphite hover:bg-surface-secondary'
                 }`}
               >
                 Even IDs Only
@@ -228,8 +270,10 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
               <button
                 type="button"
                 onClick={() => setFilterMode('exclude_top1')}
-                className={`py-1.5 px-2 rounded border text-left cursor-pointer transition ${
-                  filterMode === 'exclude_top1' ? 'border-accent bg-surface-secondary text-accent font-semibold' : 'border-border bg-white text-graphite'
+                className={`py-1.5 px-2 rounded-lg border text-left cursor-pointer transition ${
+                  filterMode === 'exclude_top1'
+                    ? 'border-accent bg-accent/10 text-accent font-semibold'
+                    : 'border-border bg-surface-subtle text-graphite hover:bg-surface-secondary'
                 }`}
               >
                 Exclude Top-1
@@ -237,8 +281,10 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
               <button
                 type="button"
                 onClick={() => setFilterMode('custom')}
-                className={`py-1.5 px-2 rounded border text-left cursor-pointer transition ${
-                  filterMode === 'custom' ? 'border-accent bg-surface-secondary text-accent font-semibold' : 'border-border bg-white text-graphite'
+                className={`py-1.5 px-2 rounded-lg border text-left cursor-pointer transition ${
+                  filterMode === 'custom'
+                    ? 'border-accent bg-accent/10 text-accent font-semibold'
+                    : 'border-border bg-surface-subtle text-graphite hover:bg-surface-secondary'
                 }`}
               >
                 Custom List
@@ -251,34 +297,46 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 value={customFilterStr}
                 onChange={(e) => setCustomFilterStr(e.target.value)}
                 placeholder="1000, 1002, 1005"
-                className="w-full px-2.5 py-1.5 text-xs font-mono rounded border border-border bg-white text-graphite mt-2"
+                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-border bg-surface-subtle text-graphite mt-2 focus:border-accent focus:outline-none"
               />
             )}
           </div>
 
+          {/* Action Button with Tactile Feedback */}
           <button
-            onClick={runSearch}
+            onClick={() => runSearch(true)}
             disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            className="w-full py-2.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm hover:shadow-glow transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 active:scale-[0.98]"
           >
-            <Search className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            <span>{loading ? 'Evaluating Query...' : 'Execute Vector Search'}</span>
+            {loading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Evaluating Matrix Kernel...</span>
+              </>
+            ) : (
+              <>
+                <Search className="w-4 h-4" />
+                <span>Execute Vector Search</span>
+              </>
+            )}
           </button>
         </div>
 
         {/* Right Output Column (7 Cols) */}
         <div className="lg:col-span-7 space-y-6">
           {error && (
-            <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0 text-rose-600" />
+            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 text-red-500" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Metric Cards Row */}
+          {/* Metric Cards Row with Flash Animation */}
           {result && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-surface-card border border-border rounded-lg p-3.5 shadow-subtle">
+              <div className={`bg-surface-card border rounded-xl p-3.5 shadow-subtle transition-all duration-300 ${
+                evalFlash ? 'border-accent shadow-glow scale-[1.02]' : 'border-border'
+              }`}>
                 <span className="text-[11px] font-mono text-graphite-muted block">Query Latency</span>
                 <span className="text-lg font-mono font-bold text-graphite-dark mt-0.5 block">
                   {result.latency_ms.toFixed(3)} ms
@@ -288,7 +346,9 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 </span>
               </div>
 
-              <div className="bg-surface-card border border-border rounded-lg p-3.5 shadow-subtle">
+              <div className={`bg-surface-card border rounded-xl p-3.5 shadow-subtle transition-all duration-300 ${
+                evalFlash ? 'border-accent shadow-glow scale-[1.02]' : 'border-border'
+              }`}>
                 <span className="text-[11px] font-mono text-graphite-muted block">Distance Ops</span>
                 <span className="text-lg font-mono font-bold text-accent mt-0.5 block">
                   {result.distance_computations} / {dataset?.n_base || 120}
@@ -298,9 +358,11 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 </span>
               </div>
 
-              <div className="bg-surface-card border border-border rounded-lg p-3.5 shadow-subtle">
+              <div className={`bg-surface-card border rounded-xl p-3.5 shadow-subtle transition-all duration-300 ${
+                evalFlash ? 'border-accent shadow-glow scale-[1.02]' : 'border-border'
+              }`}>
                 <span className="text-[11px] font-mono text-graphite-muted block">Oracle Recall@k</span>
-                <span className="text-lg font-mono font-bold text-emerald-700 mt-0.5 block">
+                <span className="text-lg font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 block">
                   {(result.recall_at_k * 100).toFixed(1)}%
                 </span>
                 <span className="text-[10px] text-graphite-muted">
@@ -308,7 +370,9 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 </span>
               </div>
 
-              <div className="bg-surface-card border border-border rounded-lg p-3.5 shadow-subtle">
+              <div className={`bg-surface-card border rounded-xl p-3.5 shadow-subtle transition-all duration-300 ${
+                evalFlash ? 'border-accent shadow-glow scale-[1.02]' : 'border-border'
+              }`}>
                 <span className="text-[11px] font-mono text-graphite-muted block">Eligible Pool</span>
                 <span className="text-lg font-mono font-bold text-graphite-dark mt-0.5 block">
                   {result.num_eligible_ground_truth}
@@ -320,8 +384,8 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
             </div>
           )}
 
-          {/* Results Table */}
-          <div className="bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-4">
+          {/* Results Table with Row Refresh Animation */}
+          <div className="bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-4 transition-colors">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
                 <h3 className="font-heading font-semibold text-sm text-graphite-dark">
@@ -331,7 +395,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                   Sorted deterministically by <code>(distance, external_id)</code>
                 </span>
               </div>
-              <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite">
+              <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite border border-border">
                 Top-{k}
               </span>
             </div>
@@ -347,9 +411,13 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                       <th className="py-2.5 px-3 font-semibold text-center">Oracle Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border bg-white text-graphite">
-                    {result.results.map((item) => (
-                      <tr key={item.id} className="hover:bg-surface-subtle">
+                  <tbody key={flashKey} className="divide-y divide-border bg-surface-card text-graphite">
+                    {result.results.map((item, idx) => (
+                      <tr 
+                        key={item.id} 
+                        className="hover:bg-surface-subtle transition-colors animate-fade-in"
+                        style={{ animationDelay: `${idx * 25}ms` }}
+                      >
                         <td className="py-2 px-3 font-bold text-graphite">#{item.rank}</td>
                         <td className="py-2 px-3 font-bold text-accent">{item.id}</td>
                         <td className="py-2 px-3 text-right text-graphite-muted font-mono">
@@ -357,11 +425,11 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                         </td>
                         <td className="py-2 px-3 text-center">
                           {item.is_exact_match ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-[11px]">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
                               <CheckCircle className="w-3 h-3" /> Oracle Hit
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-accent font-semibold text-[11px]">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-accent font-semibold text-[11px]">
                               ANN Approximation
                             </span>
                           )}

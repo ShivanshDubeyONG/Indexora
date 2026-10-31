@@ -39,10 +39,11 @@ export const Footer: React.FC = () => {
             className="inline-flex items-center gap-1.5 text-graphite-muted hover:text-graphite transition"
           >
             <GitBranch className="w-4 h-4 text-accent" />
-            <span>GitHub Repository</span>
+            <span>GitHub</span>
           </a>
         </div>
       </div>
     </footer>
   );
 };
+

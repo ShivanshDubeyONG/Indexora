@@ -186,3 +186,4 @@ export async function searchSemantic(params: {
   }
   return res.json();
 }
+

@@ -59,3 +59,4 @@ export const Navigation: React.FC<NavProps> = ({ activeTab, onChangeTab }) => {
     </nav>
   );
 };
+

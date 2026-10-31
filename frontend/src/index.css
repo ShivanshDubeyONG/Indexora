@@ -3,10 +3,51 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* LIGHT MODE (Clean, light airy blue-white) */
+    --bg-canvas: #F8FAFC;
+    --bg-surface-card: #FFFFFF;
+    --bg-surface-subtle: #F2F8FF;
+    --bg-surface-secondary: #E5F1FC;
+    
+    --accent-primary: #3986D9;
+    --accent-hover: #2563EB;
+    --accent-subtle: #E0EEFD;
+
+    --text-graphite-dark: #1E293B;
+    --text-graphite: #303943;
+    --text-graphite-muted: #687583;
+    --text-graphite-subtle: #94A3B8;
+
+    --border-color: #D5E2EF;
+    --border-subtle: #E2E8F0;
+  }
+
+  /* DARK MODE (Refined Graphitish Blue / Obsidian Slate) */
+  html.dark {
+    --bg-canvas: #0B1118;
+    --bg-surface-card: #111A24;
+    --bg-surface-subtle: #152230;
+    --bg-surface-secondary: #1B2B3D;
+
+    --accent-primary: #3B82F6;
+    --accent-hover: #60A5FA;
+    --accent-subtle: #1E3A5F;
+
+    --text-graphite-dark: #F8FAFC;
+    --text-graphite: #E2E8F0;
+    --text-graphite-muted: #94A3B8;
+    --text-graphite-subtle: #64748B;
+
+    --border-color: #243548;
+    --border-subtle: #1E2B3A;
+  }
+
   body {
-    background-color: #F8FAFC;
-    color: #303943;
+    background-color: var(--bg-canvas);
+    color: var(--text-graphite);
     letter-spacing: -0.01em;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   /* Custom subtle scrollbars */
@@ -18,15 +59,18 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #D5E2EF;
+    background: var(--border-color);
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #94A3B8;
+    background: var(--text-graphite-subtle);
   }
 }
 
-/* Subtle ambient radial wash */
+/* Ambient radial glow */
 .ambient-glow {
-  background: radial-gradient(circle 800px at 50% -120px, rgba(57, 134, 217, 0.07), transparent 70%);
+  background: radial-gradient(circle 800px at 50% -120px, rgba(57, 134, 217, 0.08), transparent 70%);
+}
+html.dark .ambient-glow {
+  background: radial-gradient(circle 800px at 50% -120px, rgba(59, 130, 246, 0.12), transparent 70%);
 }

@@ -414,3 +414,4 @@ export const IndexManagementView: React.FC<IndexManagementViewProps> = ({ status
     </div>
   );
 };
+
