@@ -221,7 +221,7 @@ When presenting Indexora in an interview or demo, follow this 4-step walkthrough
 ```bash
 # Step 1: Verify Algorithmic Correctness (15s)
 pytest -q
-# Point out: 328 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
+# Point out: 329 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
 
 # Step 2: Run Offline Smoke Benchmark (10s)
 python -m indexora.benchmark --smoke --no-plot

@@ -1,7 +1,7 @@
 # Indexora
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests Passing](https://img.shields.io/badge/tests-325%20passed-success.svg)]()
+[![Tests Passing](https://img.shields.io/badge/tests-329%20passed-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
@@ -59,7 +59,7 @@ flowchart TD
 | **Exact (BLAS)** | `ExactBlasIndex` | Fast ($O(1)$) | Low for $N \le 10^4$ | Baseline ($4 \cdot N \cdot d$ B) | 100% | Datasets up to 10k vectors or when 100% recall is strictly required. |
 | **IVF-Flat** | `IVFFlatIndex` | Moderate ($K$-means) | Sub-linear ($O(\frac{N}{\text{nlist}} \cdot \text{nprobe})$) | Baseline ($+ \text{centroids}$) | High (tunable via `nprobe`) | Low-memory approximate search with fast build times on clustered data. |
 | **IVF-PQ** | `IVFPQIndex` | High (residual $K$-means) | Sub-linear ($O(\text{cand} \cdot M)$ table lookups) | **Very Low (15x–64x compression)** | Moderate to High | Memory-constrained environments; massive datasets that must fit in RAM. |
-| **HNSW** | `HNSWIndex` | High ($O(N \log N)$ graph construction) | **Ultra-low ($O(\log N)$)** | Moderate ($+ M$ edges/node) | **Very High (98%–100%)** | Low-latency applications (RAG, live search) prioritizing top-k retrieval speed. |
+| **HNSW** | `HNSWIndex` | High ($O(N \log N)$ graph construction) | **Ultra-low (empirical $O(\log N)$ with fixed $ef, M$)** | Moderate ($+ M$ edges/node) | **Very High (98%–100%)** | Low-latency applications (RAG, live search) prioritizing top-k retrieval speed. |
 
 ---
 
@@ -111,7 +111,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** on synthetic clustered data while evaluating only ~15% of database distances.
 - **Phase 11 (Mutations, Filtering & Persistence):** Complete. Implemented incremental additions (`add`), deletions (`delete`), filtered candidate search (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core index implementations. Features pickle-free `.npy` storage, SHA-256 manifest integrity verification, CSR graph serialization for HNSW without re-indexing, and codebook preservation for IVF-PQ without retraining.
 - **Phase 12A (Interactive Index Lab):** Complete. Built a local-first interactive web laboratory in Streamlit backed directly by Indexora's actual vector engines. Features interactive query search with 2D PCA spatial maps, comparative accuracy-vs-latency benchmarks across all 5 core indexes, real-time incremental additions and tombstone deletions, and atomic disk persistence verification with SHA-256 checksums.
-- **Phase 12B (Semantic Text Search Integration):** Complete. Delivered end-to-end natural language semantic search backed directly by Indexora's native vector retrieval engines (Exact BLAS, IVF-Flat, and HNSW) and pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). Features a curated 25-document technical demonstration corpus across 5 engineering domains (distinguished from offline mock embedding fallbacks), strict separation of embedding time from indexing time, exact top-$k$ recall evaluation on live queries, category filtering, and mathematical equivalence between unit-vector squared L2 distance and cosine similarity. All 328 tests pass completely offline.
+- **Phase 12B (Semantic Text Search Integration):** Complete. Delivered end-to-end natural language semantic search backed directly by Indexora's native vector retrieval engines (Exact BLAS, IVF-Flat, and HNSW) and pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). Features a curated 25-document technical demonstration corpus across 5 engineering domains (distinguished from offline mock embedding fallbacks), strict separation of embedding time from indexing time, exact top-$k$ recall evaluation on live queries, category filtering, and mathematical equivalence between unit-vector squared L2 distance and cosine similarity. All 329 tests pass completely offline.
 
 ## Project Conventions
 
@@ -213,6 +213,11 @@ Evaluation on the first 100,000 base vectors and 1,000 queries ($d=128$, $k=10$,
 | **IVF-Flat** | 100 | 1 | 0.5287 | 0.5287 | **0.72** | 1.22 | **1,534.6** | 1,213 | 22.77s | 100 / False |
 | **IVF-Flat** | 100 | 10 | 0.9791 | 0.9791 | 8.32 | 11.14 | 116.8 | 10,928 | 22.77s | 100 / False |
 | **IVF-Flat** | 100 | 20 | **0.9980** | 0.9980 | 17.75 | 21.18 | 55.9 | 21,481 | 22.77s | 100 / False |
+
+<div align="center">
+  <img src="results/sift100k_p66/recall_vs_latency.png" alt="SIFT-100k Recall vs Median Latency" width="750" />
+  <p><em>Figure 1: Verified SIFT-100k Recall@10 vs. Median Query Latency curve comparing Exact Reference, Exact BLAS, and IVF-Flat multi-probe parameter sweeps.</em></p>
+</div>
 
 **Key Takeaways & Limitations:**
 - **Exact Scan Baseline & Chunking Context:** BLAS Exact achieves $3.15\times$ higher throughput (19.5 vs. 6.2 QPS) and $1.51\times$ lower p50 latency than the coordinate-difference reference oracle under default bounded chunking (`max_db_chunk=32768`). In an unconstrained batched matrix GEMM scan with precomputed norms, direct BLAS reaches ~375–750 QPS. The default chunking bounds peak intermediate memory allocations by falling back to sequential single-query block scans when $N > 32768$.
@@ -474,7 +479,7 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
    ```bash
    pytest -q
    ```
-   Runs 325 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
+   Runs 329 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
 
 2. **Run the Offline Smoke Benchmark (5s):**
    ```bash
@@ -495,9 +500,12 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 
 - **[`docs/architecture.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/architecture.md):** Comprehensive technical architecture, mathematical foundations, data structures, and trade-off disclosures.
 - **[`docs/interview_prep.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/interview_prep.md):** 16 in-depth technical interview questions, rigorous answers, and live demonstration script.
+- **[`docs/DEMO_WALKTHROUGH.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview demonstration guide.
+- **[`docs/FINAL_AUDIT_REPORT.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/FINAL_AUDIT_REPORT.md):** Comprehensive project audit, security hardening, and release readiness verification.
+- **[`docs/RELEASE_NOTES_v1.0.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/RELEASE_NOTES_v1.0.md):** v1.0 release notes, architecture breakdown, and verified benchmark metrics.
+- **[`docs/decisions.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/decisions.md):** Architecture Decision Records (ADRs 0001 through 0009).
 - `plan/project srs.md`: Project Brief & Software Requirements Specification (SRS v3.0)
 - `plan/tech design.md`: Architecture, Data Model, Kernel Contracts & Experiments (v3.0)
 - `plan/implementation.md`: 14-phase acceptance-gated roadmap and ownership policy (v3.0)
-- `docs/decisions.md`: Architecture Decision Records (ADRs 0001 through 0008)
 - `docs/phase1_learning_guide.md`: Phase 1 concepts, hand-worked examples, and exercises
 - `docs/phase1_test_spec.md`: Phase 1 test matrix and edge-case contracts
