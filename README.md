@@ -1,7 +1,7 @@
 # Indexora
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests Passing](https://img.shields.io/badge/tests-377%20passed-success.svg)]()
+[![Tests Passing](https://img.shields.io/badge/tests-381%20passed-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
@@ -12,22 +12,31 @@
 
 ## Performance Overview & Benchmark Evidence
 
-The table below presents verified, reproducible benchmark measurements across Indexora's core index implementations evaluated on the standard **Texmex SIFT** dataset ($d=128$, $k=10$, squared Euclidean distance).
+The tables below present verified, reproducible benchmark measurements across Indexora's core index implementations evaluated on the standard **Texmex SIFT** dataset ($d=128$, $k=10$, squared Euclidean distance).
 
-| Architecture | Dataset Scale | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Distance / LUT Ops | Index RAM (MiB) | Bytes / Vec |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plain BLAS Scan** (Real Baseline) | SIFT-100K | Unconstrained GEMM | **1.0000** | ~2.10 ms | **474.8 QPS** | 100,000 | 51.2 MiB | 512.0 B |
-| **Exact (BLAS)** (Chunked Bounded) | SIFT-100K | `max_db_chunk=32768` | **1.0000** | 16.53 ms | **280.1 QPS** | 100,000 | 51.2 MiB | 512.0 B |
-| **Exact (Reference)** (Oracle Loop) | SIFT-100K | Float64 coordinate differences | **1.0000** | 150.69 ms | 6.2 QPS | 100,000 | 51.2 MiB | 512.0 B |
-| **IVF-Flat** | SIFT-100K | $n_{\text{list}}=100, n_{\text{probe}}=1$ | 0.5287 | **0.72 ms** | **1,534.6 QPS** | 1,213 | 51.3 MiB | 513.0 B |
-| **IVF-Flat** | SIFT-100K | $n_{\text{list}}=100, n_{\text{probe}}=10$ | **0.9791** | 8.32 ms | 116.8 QPS | 10,928 | 51.3 MiB | 513.0 B |
-| **IVF-Flat** | SIFT-100K | $n_{\text{list}}=100, n_{\text{probe}}=20$ | **0.9980** | 17.75 ms | 55.9 QPS | 21,481 | 51.3 MiB | 513.0 B |
-| **IVF-PQ** (20.8× Compression) | SIFT-100K | $n_{\text{list}}=100, M=16, n_{\text{probe}}=1$ | 0.4215 | 2.01 ms | **501.8 QPS** | 1,203 LUT | **2.46 MiB** | **25.8 B** |
-| **IVF-PQ** (20.8× Compression) | SIFT-100K | $n_{\text{list}}=100, M=16, n_{\text{probe}}=10$ | 0.6204 | 16.67 ms | 56.8 QPS | 10,723 LUT | **2.46 MiB** | **25.8 B** |
-| **HNSW** (Proximity Graph) | **SIFT-10K** | $M=16, ef_c=64, ef_s=16$ | **0.9423** | 2.29 ms | 396.8 QPS | **374** | 7.48 MiB | 784.7 B |
-| **HNSW** (Proximity Graph) | **SIFT-10K** | $M=16, ef_c=64, ef_s=32$ | **0.9730** | 3.57 ms | 276.1 QPS | **545** | 7.48 MiB | 784.7 B |
-| **HNSW** (Proximity Graph) | **SIFT-10K** | $M=16, ef_c=64, ef_s=64$ | **0.9881** | 5.68 ms | 176.6 QPS | **815** | 7.48 MiB | 784.7 B |
-| **HNSW** (Proximity Graph) | **SIFT-10K** | $M=16, ef_c=64, ef_s=128$ | **0.9944** | 8.32 ms | 113.8 QPS | **1,215** | 7.48 MiB | 784.7 B |
+### SIFT-100K Benchmark ($N=100,000$, $Q=1,000$, $d=128$)
+
+| Architecture | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Work per Query | Array Storage (MiB) | Memory Scaling Behavior |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Plain BLAS Scan** (Raw NumPy Reference) | Unconstrained GEMM | **1.0000** | ~2.10 ms | **474.8 QPS** | 100,000 ops | 48.83 MiB | Unbounded ($O(N \cdot Q)$ intermediate RAM) |
+| **Exact (BLAS)** (Chunked Implementation) | `max_db_chunk=32768` | **1.0000** | 16.53 ms | **280.1 QPS** | 100,000 ops | 48.83 MiB | Bounded by database chunk ($O(\text{chunk} \cdot Q_{\text{chunk}})$) |
+| **Exact (Reference)** (Oracle Loop) | Float64 coordinate loop | **1.0000** | 150.69 ms | 6.2 QPS | 100,000 ops | 48.83 MiB | Strict numerical reference oracle |
+| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=1$ | 0.5287 | **0.72 ms** | **1,534.6 QPS** | 1,213 ops | 48.88 MiB | Fast candidate pruning |
+| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=10$ | **0.9791** | 8.32 ms | 116.8 QPS | 10,928 ops | 48.88 MiB | High-recall operating point |
+| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=20$ | **0.9980** | 17.75 ms | 55.9 QPS | 21,481 ops | 48.88 MiB | Near-lossless recovery |
+| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=1$ | 0.4215 | 2.01 ms | **501.8 QPS** | 1,203 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=10$ | 0.6204 | 16.67 ms | 56.8 QPS | 10,723 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=20$ | **0.6236** | 33.39 ms | 35.5 QPS | 21,060 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+
+### SIFT-10K Subset Benchmark ($N=10,000$, $Q=1,000$, $d=128$)
+*Note: Evaluated on the first 10,000 base vectors with exact subset ground truth to respect pure-Python graph-traversal interpreter constraints. Not directly comparable in QPS to 100K runs due to dataset scale differences.*
+
+| Architecture | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Distance Ops / Query | Serialized Storage | Candidate Inspection |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=16$ | **0.9423** | 2.29 ms | 396.8 QPS | **374** | 7.48 MiB (est.) | Inspects only 3.7% of database |
+| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=32$ | **0.9730** | 3.57 ms | 276.1 QPS | **545** | 7.48 MiB (est.) | Inspects only 5.4% of database |
+| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=64$ | **0.9881** | 5.68 ms | 176.6 QPS | **815** | 7.48 MiB (est.) | Inspects only 8.1% of database |
+| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=128$ | **0.9944** | 8.32 ms | 113.8 QPS | **1,215** | 7.48 MiB (est.) | Inspects only 12.1% of database |
 
 <div align="center">
   <img src="results/sift100k_p66/recall_vs_latency.png" alt="SIFT-100k Recall vs Median Latency" width="750" />
@@ -37,14 +46,19 @@ The table below presents verified, reproducible benchmark measurements across In
 ### What These Measurements Mean
 
 1. **Honest Baseline Comparison (Plain BLAS Scan vs. IVF-Flat):**
-   - At $n_{\text{probe}}=1$, IVF-Flat achieves a **$3.2\times$ throughput speedup** over unconstrained Plain BLAS matrix scan (1,534.6 vs. 474.8 QPS) at Recall@10 = 0.5287.
+   - At $n_{\text{probe}}=1$, IVF-Flat achieves a **$3.2\times$ throughput speedup** over Plain BLAS matrix scan (1,534.6 vs. 474.8 QPS) at Recall@10 = 0.5287.
    - At $n_{\text{probe}}=10$, IVF-Flat achieves high recall (0.9791) and low single-query latency ($p_{50} = 8.32$ ms), but on full-batch queries it is **$4.1\times$ slower** than Plain BLAS (116.8 vs. 474.8 QPS). This is the honest reality of Python vector engines: Level-3 BLAS GEMM executes parallel SIMD hardware loops in optimized C/Fortran, while IVF-Flat candidate gathering must assemble NumPy slices through Python interpreter loops.
-2. **IVF-PQ Memory Compression:**
-   - IVF-PQ compresses 100,000 128-dimensional float32 vectors from **51.2 MiB down to 2.46 MiB** — a **$20.8\times$ reduction in index RAM** (25.8 bytes/vector including stored centroids and external IDs).
-   - In exchange for massive memory compression, recall tops out around ~62% due to 8-bit residual quantization error.
-3. **HNSW Proximity Graph Scaling:**
+   - **Batch QPS vs. Per-Query $p_{50}$:** Batch QPS measures sustained query volume over full batches ($Q=1,000$), where Level-3 BLAS GEMM matrix parallelism dominates. Per-query $p_{50}$ measures response time for individual query invocations ($Q=1$), which run matrix-vector operations (GEMV).
+   - **Chunked vs. Unconstrained Exact BLAS:** Plain BLAS computes an unconstrained $Q \times N$ matrix product allocating $400$ MB of intermediate RAM for $100$K vectors (and $>40$ GB for $10$M vectors). The chunked implementation (`ExactBlasIndex`, `max_db_chunk=32768, max_query_chunk=1024`) trades peak throughput to bound intermediate memory to $O(\text{chunk} \cdot Q_{\text{chunk}})$ ($\approx 134.2$ MB intermediate array), delivering **280.1 QPS** while guaranteeing bounded database-chunk memory.
+2. **IVF-PQ Memory Accounting & Accuracy Boundaries:**
+   - **Persistent Array Storage:** 2.46 MiB ($2,582,272$ bytes) covers coarse centroids ($0.05$ MiB), codebooks ($0.13$ MiB), residual quantization codes ($1.53$ MiB), and external IDs ($0.76$ MiB).
+   - **Container Overhead:** Additional persistent Python dataclass and list container overhead is approximately $0.03$ MiB ($31$ KB), bringing total persistent index structures to $\approx 2.49$ MiB.
+   - **Compression Ratios:** Against raw float32 vectors alone ($48.83$ MiB / $51.2$ MB), array storage achieves a **$19.8\times$ reduction** ($19.6\times$ including Python container overhead). Against raw vectors plus stored int64 IDs ($49.59$ MiB), array storage achieves a **$20.1\times$ reduction** ($19.9\times$ total).
+   - **Build & Training Memory:** Temporary residual vectors during $K$-means training require $48.83$ MiB; peak process RSS during the full build reached $143.6$ MiB.
+   - **Accuracy Boundary:** Maximum tested recall on SIFT-100K is **0.6236 at $n_{\text{probe}}=20$** (moderate recall bounded by 8-bit residual quantization distortion).
+3. **HNSW Proximity Graph Scaling & Memory Qualification:**
    - Evaluated on the 10,000-vector SIFT subset, HNSW achieves **94.2% to 99.4% recall** while computing only **374 to 1,215 vector distances per query** (inspecting just 3.7% to 12.1% of the database).
-   - Graph routing exhibits sub-linear distance growth, but pure-Python graph traversal per-query latency ($2.3$ to $8.3$ ms) is governed by Python bytecode dispatch overhead.
+   - **Memory Qualification:** The reported 7.48 MiB is a **logical serialized-storage estimate** based on contiguous arrays ($4.88$ MiB vectors + $0.08$ MiB IDs + $2.52$ MiB 64-bit CSR graph edges). In-memory Python heap overhead (nested `list[list[int]]` pointer structures and Python integer objects) adds runtime overhead that cannot be isolated from total process RSS ($150.4$ MiB); therefore, 7.48 MiB is strictly documented as a serialized storage estimate. Query latency ($2.3$ to $8.3$ ms) is governed by Python bytecode dispatch overhead during graph traversal.
 
 ---
 

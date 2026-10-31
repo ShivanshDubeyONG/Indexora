@@ -143,13 +143,46 @@ The table below reproduces the exact recorded results from `results/sift100k_p66
 
 ---
 
-## 8. Systematic Technical Takeaways
+## 8. Systematic Technical Takeaways & Memory Accounting
 
-1. **BLAS Acceleration:** Exact BLAS achieves a **$3.15\times$ throughput speedup** over the coordinate-differencing reference kernel (19.5 vs. 6.2 QPS) and reduces $p_{50}$ latency from 150.7ms to 99.7ms.
-2. **IVF Throughput Speedup:** At $n_{\text{list}}=100, n_{\text{probe}}=1$, IVF-Flat achieves **1,534.6 QPS** (0.72ms median latency), representing a **$78.7\times$ speedup** over the Exact BLAS baseline at 52.9% Recall@10.
-3. **Balanced Operating Point:** At $n_{\text{list}}=100, n_{\text{probe}}=5$, IVF-Flat delivers **91.3% Recall@10** at **4.53ms median latency** (220.7 QPS), reducing distance computations by **$17.9\times$** (5,589 vs. 100,000 operations per query).
-4. **Near-Lossless Operating Point:** At $n_{\text{list}}=100, n_{\text{probe}}=20$, IVF-Flat achieves **99.8% Recall@10** at **17.75ms median latency**, evaluating only 21.5% of database vectors.
-5. **Batch QPS Anomaly & Contention Hypothesis:** As documented in ADR-0008, batch QPS at $n_{\text{list}}=50, n_{\text{probe}}=10$ dropped to 8.2 QPS while individual query latencies and distance computations scaled strictly monotonically. Comparative baseline runs (`results/sift100k`) exhibited strictly monotonic throughput scaling (329.3 $\to$ 173.5 $\to$ 63.3 $\to$ 29.4 $\to$ 12.9 QPS), indicating that transient OS/CPU thread scheduling contention during that multi-minute batch execution is a plausible explanation, though without low-level kernel tracing it remains an empirical hypothesis rather than a conclusively proven root cause.
+### 8.1 Exact Baseline Comparison & Memory Trade-offs
+- **Plain BLAS Reference Baseline:** A raw NumPy reference implementation computing unconstrained Level-3 BLAS GEMM ($Q \cdot X^T$). It achieves **474.8 QPS** on SIFT-100K full batches ($Q=1,000$), but requires allocating a full $(Q \times N)$ float32 intermediate distance array ($\approx 400$ MB for 100,000 vectors, scaling to $>40$ GB for 10 million vectors). It is an unconstrained reference baseline, not a production-scalable index.
+- **Chunked Exact BLAS Implementation:** `ExactBlasIndex` trades peak unconstrained throughput to bound database-chunk memory. Intermediate distance allocations scale as $O(\text{max\_db\_chunk} \cdot \text{max\_query\_chunk})$. With default `max_db_chunk=32768` and `max_query_chunk=1024`, intermediate array memory is bounded to $\approx 134.2$ MB regardless of how large the total database $N$ grows. It achieves **280.1 QPS** with single-query $p_{50} = 16.53$ ms.
+- **Batch QPS vs. Single-Query $p_{50}$:** Batch QPS measures sustained throughput across repeated full-batch evaluations ($Q=1,000$) where Level-3 BLAS GEMM matrix parallelism dominates. Per-query $p_{50}$ measures response time for individual single-query invocations ($Q=1$), which run matrix-vector operations (GEMV).
+- **Numerical Oracle:** The coordinate-difference loop (`exact_reference`) serves as the ground-truth numerical oracle with float64 accumulation (6.2 QPS, 150.7 ms $p_{50}$).
+
+### 8.2 IVF-Flat Performance Characteristics
+- **Throughput vs. Plain BLAS:** At $n_{\text{probe}}=1$, IVF-Flat achieves **1,534.6 QPS** ($3.2\times$ faster than Plain BLAS scan) at 52.9% Recall@10.
+- **Python Overhead on Full Batches:** At $n_{\text{probe}}=10$, IVF-Flat achieves **97.9% Recall@10** at **8.32ms median latency**, but on batched queries it drops to **116.8 QPS** ($4.1\times$ slower than Plain BLAS). Level-3 BLAS GEMM executes parallel hardware SIMD instructions in C, whereas IVF-Flat candidate gathering must assemble NumPy slices through Python interpreter loops.
+
+### 8.3 IVF-PQ Persistent Memory Accounting (`results/sift100k_ivfpq/`)
+Evaluated on full SIFT-100K ($N=100,000, d=128, n_{\text{list}}=100, M=16, k_{\text{sub}}=256$):
+- **Persistent NumPy Array Storage:**
+  - Coarse Centroids (`float32`): $100 \times 128 \times 4\text{ B} = 51,200\text{ B}$ ($0.049\text{ MiB}$)
+  - PQ Codebooks (`float32`): $16 \times 256 \times 8 \times 4\text{ B} = 131,072\text{ B}$ ($0.125\text{ MiB}$)
+  - Quantization Codes (`uint8`): $100,000 \times 16 \times 1\text{ B} = 1,600,000\text{ B}$ ($1.526\text{ MiB}$)
+  - External IDs (`int64`): $100,000 \times 8\text{ B} = 800,000\text{ B}$ ($0.763\text{ MiB}$)
+  - **Array Storage Subtotal:** **$2,582,272\text{ B} = 2.4626\text{ MiB}$** ($25.8\text{ bytes/vector}$)
+- **Additional Persistent Python Container Overhead:**
+  - 100 `InvertedPQList` dataclass wrappers and array header objects add $\approx 31,256\text{ B} \approx 0.030\text{ MiB}$, bringing total persistent in-memory structures to $\approx 2.49\text{ MiB}$.
+- **Compression Baselines & Ratios:**
+  - *Against Raw Vectors Alone ($48.83\text{ MiB} = 51.2\text{ MB}$):* Persistent array reduction is **$19.8\times$** ($19.6\times$ including Python container wrappers).
+  - *Against Raw Vectors + Stored IDs ($49.59\text{ MiB} = 52.0\text{ MB}$):* Persistent array reduction is **$20.1\times$** ($19.9\times$ including Python container wrappers).
+- **Temporary Training & Build Memory:**
+  - Temporary residual vectors during $K$-means training require $48.83\text{ MiB}$.
+  - Peak process RSS during build was **$143.6\text{ MiB}$** (includes loaded raw SIFT arrays, training buffers, and Python runtime).
+- **Accuracy Boundary:** Maximum tested recall is **0.6236 at $n_{\text{probe}}=20$** (moderate recall governed by 8-bit residual quantization error).
+
+### 8.4 HNSW Proximity Graph Accounting (`results/sift10k_hnsw/`)
+Evaluated on the **SIFT-10K subset** (first 10,000 base vectors, $d=128, M=16, ef_{\text{construction}}=64$):
+- **Logical Serialized Storage Estimate:**
+  - Stored Base Vectors (`float32`): $10,000 \times 128 \times 4\text{ B} = 5,120,000\text{ B}$ ($4.88\text{ MiB}$)
+  - External IDs (`int64`): $10,000 \times 8\text{ B} = 80,000\text{ B}$ ($0.076\text{ MiB}$)
+  - Graph Edges (CSR packed, 64-bit indices): $\approx 330,875\text{ directed edges} \times 8\text{ B} \approx 2,647,000\text{ B}$ ($2.52\text{ MiB}$)
+  - **Total Serialized Storage Estimate:** **$7.48\text{ MiB}$** ($784.7\text{ bytes/vector}$)
+- **In-Memory Python Heap Limitation:**
+  - 7.48 MiB represents logical packed array storage when saved to disk. During live process execution, `HNSWIndex` stores adjacency lists as nested Python lists (`list[list[list[int]]]`). Python list headers (56B each), pointer arrays (8B per edge), and boxed integer objects add substantial runtime heap overhead that cannot be isolated from total process RSS ($150.4\text{ MiB}$).
+- **Search Efficiency:** Achieves **94.2% to 99.4% recall** while evaluating only **374 to 1,215 vector distances per query** (3.7% to 12.1% of the 10K dataset). Per-query latency ($2.3$ to $8.3$ ms) is governed by Python bytecode dispatch overhead.
 
 ---
 
@@ -159,24 +192,13 @@ The table below reproduces the exact recorded results from `results/sift100k_p66
 ```bash
 python -m indexora.benchmark --smoke --no-plot
 ```
-Generates verified machine-readable JSON and CSV manifests in `benchmark_output/`.
 
-### 9.2 Full SIFT-100K Benchmark Run
-1. Download Texmex SIFT1M dataset:
-   ```bash
-   curl -O ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz
-   tar -xzf sift.tar.gz
-   ```
-2. Execute the sweep:
-   ```bash
-   python -m indexora.benchmark \
-       --dataset sift_fvecs \
-       --base-path sift/sift_base.fvecs \
-       --query-path sift/sift_query.fvecs \
-       --n-base 100000 \
-       --n-queries 1000 \
-       --k 10 \
-       --nlist 10,50,100 \
-       --nprobe 1,2,5,10,20 \
-       --output-dir results/my_sift_run
-   ```
+### 9.2 Full SIFT Scale Benchmark Sweeps
+- **SIFT-100K Baseline & IVF-Flat:**
+  ```bash
+  python -m indexora.benchmark --dataset sift_fvecs --base-path sift/sift_base.fvecs --query-path sift/sift_query.fvecs --n-base 100000 --n-queries 1000 --k 10 --nlist 10,50,100 --nprobe 1,2,5,10,20
+  ```
+- **SIFT-100K IVF-PQ Compression Sweep:**
+  Evaluates IVFPQIndex across $n_{\text{probe}} \in [1, 5, 10, 20]$ with $M=16, k_{\text{sub}}=256, n_{\text{list}}=100$ against exact SIFT-100K ground truth. Output saved to `results/sift100k_ivfpq/`.
+- **SIFT-10K HNSW Proximity Graph Sweep:**
+  Evaluates HNSWIndex on the first 10,000 base vectors across $ef_{\text{search}} \in [16, 32, 64, 128]$ with $M=16, ef_{\text{construction}}=64$ against exact subset ground truth. Output saved to `results/sift10k_hnsw/`.
