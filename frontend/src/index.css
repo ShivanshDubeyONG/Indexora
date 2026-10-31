@@ -4,50 +4,60 @@
 
 @layer base {
   :root {
-    /* LIGHT MODE (Clean, light airy blue-white Hallmark aesthetic) */
-    --bg-canvas: #F8FAFC;
+    /* LIGHT MODE (Clean, airy enterprise dashboard like the screenshot) */
+    --bg-canvas: #F4F7FB;
     --bg-surface-card: #FFFFFF;
-    --bg-surface-subtle: #F2F8FF;
-    --bg-surface-secondary: #E5F1FC;
+    --bg-surface-subtle: #F8FAFD;
+    --bg-surface-secondary: #EDF2F7;
 
-    --accent-primary: #3986D9;
-    --accent-hover: #2563EB;
-    --accent-subtle: #E0EEFD;
+    --sidebar-bg: #0E1E38;
+    --sidebar-active: #E05638;
+    --sidebar-text: #94A3B8;
 
-    --text-graphite-dark: #1E293B;
-    --text-graphite: #303943;
-    --text-graphite-muted: #687583;
-    --text-graphite-subtle: #94A3B8;
+    --accent-primary: #3182CE;
+    --accent-hover: #2B6CB0;
+    --accent-coral: #E05638;
+    --accent-subtle: #EBF8FF;
 
-    --border-color: #D5E2EF;
-    --border-subtle: #E2E8F0;
+    --text-graphite-dark: #1A202C;
+    --text-graphite: #2D3748;
+    --text-graphite-muted: #718096;
+    --text-graphite-subtle: #A0AEC0;
+
+    --border-color: #E2E8F0;
+    --border-subtle: #EDF2F7;
   }
 
-  /* DARK MODE (Ultra-Clean Obsidian Graphite — No Tacky Murky Blue Tint) */
+  /* DARK MODE (Refined Navy / Slate) */
   html.dark {
-    --bg-canvas: #0A0B0E;
-    --bg-surface-card: #121418;
-    --bg-surface-subtle: #181A20;
-    --bg-surface-secondary: #20232A;
+    --bg-canvas: #0F172A;
+    --bg-surface-card: #1E293B;
+    --bg-surface-subtle: #182234;
+    --bg-surface-secondary: #273549;
+
+    --sidebar-bg: #0A1120;
+    --sidebar-active: #E05638;
+    --sidebar-text: #64748B;
 
     --accent-primary: #3B82F6;
     --accent-hover: #60A5FA;
-    --accent-subtle: rgba(59, 130, 246, 0.12);
+    --accent-coral: #EF4444;
+    --accent-subtle: rgba(59, 130, 246, 0.15);
 
-    --text-graphite-dark: #F3F4F6;
-    --text-graphite: #E5E7EB;
-    --text-graphite-muted: #9CA3AF;
-    --text-graphite-subtle: #6B7280;
+    --text-graphite-dark: #F8FAFC;
+    --text-graphite: #E2E8F0;
+    --text-graphite-muted: #94A3B8;
+    --text-graphite-subtle: #64748B;
 
-    --border-color: #24272E;
-    --border-subtle: #1B1D22;
+    --border-color: #334155;
+    --border-subtle: #1E293B;
   }
 
   body {
     background-color: var(--bg-canvas);
     color: var(--text-graphite);
     letter-spacing: -0.01em;
-    transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
   /* Custom subtle scrollbars */
@@ -65,12 +75,4 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--text-graphite-subtle);
   }
-}
-
-/* Ambient radial glow */
-.ambient-glow {
-  background: radial-gradient(circle 800px at 50% -120px, rgba(57, 134, 217, 0.08), transparent 70%);
-}
-html.dark .ambient-glow {
-  background: radial-gradient(circle 800px at 50% -120px, rgba(59, 130, 246, 0.06), transparent 70%);
 }

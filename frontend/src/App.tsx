@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { Navigation, NavTabId } from './components/Navigation';
 import { Footer } from './components/Footer';
 import { CommandPalette } from './components/CommandPalette';
+import { NavTabId } from './components/Navigation';
 import { OverviewView } from './views/OverviewView';
 import { SearchLabView } from './views/SearchLabView';
 import { BenchmarkStudioView } from './views/BenchmarkStudioView';
@@ -68,14 +69,12 @@ export const App: React.FC = () => {
   // Global Keyboard Shortcuts (Ctrl+K, 1-6 tabs, D theme, R refresh)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Toggle Command Palette (Cmd+K or Ctrl+K)
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
         return;
       }
 
-      // If user is actively typing in an input or textarea, do not intercept keys
       const activeEl = document.activeElement;
       const isInput = activeEl && (
         activeEl.tagName === 'INPUT' ||
@@ -99,50 +98,63 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-surface text-graphite antialiased font-sans selection:bg-accent/20 selection:text-accent transition-colors">
-      <Header
-        status={status}
-        loading={loading}
+    <div className="min-h-screen flex bg-surface text-graphite antialiased font-sans selection:bg-accent/20 selection:text-accent transition-colors">
+      {/* Slim Vertical Icon Rail (Modeled after the Salesforce/Enterprise dashboard screenshot) */}
+      <Sidebar
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
         onRefresh={loadState}
-        onOpenPalette={() => setPaletteOpen(true)}
+        loading={loading}
       />
-      <Navigation activeTab={activeTab} onChangeTab={setActiveTab} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'overview' && (
-          <OverviewView
-            status={status}
-            dataset={dataset}
-            onDatasetUpdated={loadState}
-          />
-        )}
-        {activeTab === 'search' && (
-          <SearchLabView
-            dataset={dataset}
-          />
-        )}
-        {activeTab === 'benchmarks' && (
-          <BenchmarkStudioView
-            dataset={dataset}
-          />
-        )}
-        {activeTab === 'explorer' && (
-          <VectorExplorerView
-            dataset={dataset}
-          />
-        )}
-        {activeTab === 'management' && (
-          <IndexManagementView
-            status={status}
-            onStateChanged={loadState}
-          />
-        )}
-        {activeTab === 'semantic' && (
-          <SemanticSearchView />
-        )}
-      </main>
+      {/* Main Content Column */}
+      <div className="flex-1 flex flex-col pl-16 min-w-0 transition-all">
+        <Header
+          status={status}
+          loading={loading}
+          onRefresh={loadState}
+          onOpenPalette={() => setPaletteOpen(true)}
+        />
 
-      <Footer />
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {activeTab === 'overview' && (
+            <OverviewView
+              status={status}
+              dataset={dataset}
+              onDatasetUpdated={loadState}
+              onNavigateToSearch={() => setActiveTab('search')}
+            />
+          )}
+          {activeTab === 'search' && (
+            <SearchLabView
+              dataset={dataset}
+            />
+          )}
+          {activeTab === 'benchmarks' && (
+            <BenchmarkStudioView
+              dataset={dataset}
+            />
+          )}
+          {activeTab === 'explorer' && (
+            <VectorExplorerView
+              dataset={dataset}
+            />
+          )}
+          {activeTab === 'management' && (
+            <IndexManagementView
+              status={status}
+              onStateChanged={loadState}
+            />
+          )}
+          {activeTab === 'semantic' && (
+            <SemanticSearchView />
+          )}
+        </main>
+
+        <Footer />
+      </div>
 
       {/* Global Command Palette */}
       <CommandPalette
