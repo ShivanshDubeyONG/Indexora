@@ -251,6 +251,26 @@ def _apply_custom_styling() -> None:
             background: #10b981;
             box-shadow: 0 0 8px #10b981;
         }
+        .idx-status-pill-amber {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.3rem 0.7rem;
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.22);
+            border-radius: 9999px;
+            font-size: 0.76rem;
+            font-weight: 500;
+            color: #fbbf24;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .idx-status-dot-amber {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+        }
 
         /* 5. Navigation Tabs */
         .stTabs [data-baseweb="tab-list"] {
@@ -597,8 +617,19 @@ def main() -> None:
     # -------------------------------------------------------------------------
     # Header Banner (Linear/Vercel App Shell Header)
     # -------------------------------------------------------------------------
+    session_val = st.session_state.get("lab_session")
+    active_cnt = getattr(session_val, "active_count", 0) if session_val else 0
+    if session_val is not None and active_cnt > 0:
+        status_label = f"Demo Session Ready ({active_cnt} active)"
+        status_pill_cls = "idx-status-pill"
+        status_dot_cls = "idx-status-dot"
+    else:
+        status_label = "Initializing Session"
+        status_pill_cls = "idx-status-pill-amber"
+        status_dot_cls = "idx-status-dot-amber"
+
     st.markdown(
-        """
+        f"""
         <div class="idx-header">
             <div class="idx-brand">
                 <div class="idx-logo-badge">⚡</div>
@@ -608,8 +639,8 @@ def main() -> None:
                 </div>
             </div>
             <div style="display:flex; align-items:center; gap: 0.75rem;">
-                <span class="idx-status-pill">
-                    <span class="idx-status-dot"></span> Engine Online
+                <span class="{status_pill_cls}">
+                    <span class="{status_dot_cls}"></span> {status_label}
                 </span>
             </div>
         </div>
@@ -719,8 +750,8 @@ def main() -> None:
                 <div class="idx-step-arrow">→</div>
                 <div class="idx-step-card">
                     <div class="idx-step-num">STAGE 04</div>
-                    <div class="idx-step-name">Top-k Ranking</div>
-                    <div class="idx-step-tech">Bounded Min-Heap</div>
+                    <div class="idx-step-name">Top-k Selection</div>
+                    <div class="idx-step-tech">Partial Selection + (Dist, ID) Sort</div>
                 </div>
                 <div class="idx-step-arrow">→</div>
                 <div class="idx-step-card idx-step-card-active">
@@ -728,6 +759,9 @@ def main() -> None:
                     <div class="idx-step-name" style="color: #34d399;">Search Result</div>
                     <div class="idx-step-tech" style="color: #6ee7b7;">SearchResult(ids, dists)</div>
                 </div>
+            </div>
+            <div class="idx-callout" style="margin-top: 1rem; margin-bottom: 1.5rem;">
+                <strong>Top-k Selection Architecture:</strong> Indexora avoids an expensive full \(O(N \log N)\) array sort by executing <code>np.argpartition</code> to perform \(O(N)\) average partial selection for the top-\(k\) candidates, followed by <code>np.lexsort</code> on <code>(distance, external_id)</code> pairs to guarantee strictly deterministic tie-breaking.
             </div>
             """,
             unsafe_allow_html=True,
@@ -814,14 +848,14 @@ def main() -> None:
                 <div class="idx-card">
                     <div class="idx-card-header">
                         <div class="idx-card-title">5. HNSW (Hierarchical Small World)</div>
-                        <span class="badge-emerald">Ultra-Low Latency</span>
+                        <span class="badge-indigo">Graph ANN</span>
                     </div>
                     <div class="idx-card-desc">
-                        Multi-layer proximity graph with exponential level decay and Algorithm 4 diversity neighbor selection. Navigates logarithmic expressways on upper layers and performs greedy beam search at layer 0.
+                        Multi-layer proximity graph with exponential level decay and Algorithm 4 diversity neighbor selection. Navigates logarithmic expressways on upper layers and performs greedy beam search at layer 0. Traversal latency is empirical sublinear under fixed search parameters. On smaller datasets, Exact BLAS may achieve lower wall-clock latency due to Python interpreter overhead in graph traversal.
                     </div>
                     <div class="idx-card-meta">
-                        <span>Complexity: <code>O(log N · d)</code></span>
-                        <span>Efficiency: ~15% Distance Ops</span>
+                        <span>Traversal: <code>Empirical Sublinear (fixed M, ef)</code></span>
+                        <span>Key Factors: <code>M, ef_search & graph degree</code></span>
                     </div>
                 </div>
                 """,
@@ -1223,11 +1257,24 @@ def main() -> None:
     with tab_mutations:
         st.markdown("### Database Administration & Storage Console")
         st.markdown(
-            "Manage real-time vector mutations (incremental additions, tombstone deletions) and execute "
+            "Manage real-time vector mutations (incremental additions, vector deletions) and execute "
             "atomic disk persistence with SHA-256 integrity validation."
         )
 
         session: LabSession = st.session_state.lab_session
+
+        # Immediate flash message display for post-mutation synchronization
+        if "mutation_flash" in st.session_state:
+            f_type, f_msg = st.session_state.pop("mutation_flash")
+            if f_type == "success":
+                st.success(f_msg)
+            elif f_type == "warning":
+                st.warning(f_msg)
+            elif f_type == "error":
+                st.error(f_msg)
+
+        if "load_verification_note" in st.session_state:
+            st.info(st.session_state.pop("load_verification_note"))
 
         stat1, stat2, stat3, stat4 = st.columns(4)
         with stat1:
@@ -1237,7 +1284,21 @@ def main() -> None:
         with stat3:
             st.metric("Incrementally Added", len(session.added_ids))
         with stat4:
-            st.metric("Tombstoned / Deleted", len(session.deleted_ids))
+            st.metric("Deleted Vectors", len(session.deleted_ids))
+
+        st.markdown(
+            """
+            <div class="idx-callout" style="margin-top: 1rem; margin-bottom: 1.25rem;">
+                <strong>Index-Specific Deletion Mechanics:</strong>
+                <ul style="margin: 0.35rem 0 0 1.2rem; padding: 0;">
+                    <li><strong>HNSW</strong>: Applies <em>logical tombstones</em> (<code>_deleted_nodes</code> set). Vectors remain in the multi-layer proximity graph to preserve graph connectivity and routing paths for other vectors, but are filtered out from search results.</li>
+                    <li><strong>Exact Flat / BLAS</strong>: Performs <em>physical removal</em> by deleting vectors and IDs directly from memory arrays.</li>
+                    <li><strong>IVF-Flat / IVF-PQ</strong>: Removes matching vector records directly from inverted posting lists.</li>
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         st.markdown("---")
         m_col1, m_col2 = st.columns(2)
@@ -1260,7 +1321,11 @@ def main() -> None:
                 vec_to_add = np.full(session.d, add_val, dtype=np.float32)
                 try:
                     assigned = session.add_vector(vec_to_add, ext_id=int(add_id))
-                    st.success(f"Committed vector ID {assigned}. Active searchable records: {session.active_count}")
+                    st.session_state["mutation_flash"] = (
+                        "success",
+                        f"Committed vector ID {assigned}. Active searchable records: {session.active_count}",
+                    )
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"Addition rejected: {exc}")
 
@@ -1269,21 +1334,25 @@ def main() -> None:
             st.markdown(
                 """
                 <div class="idx-card">
-                    <div class="idx-card-title">🗑️ Tombstone Deletion (delete)</div>
-                    <div class="idx-card-desc">Logically tombstone a vector ID to exclude it from search while preserving routing invariants.</div>
+                    <div class="idx-card-title">🗑️ Vector Deletion (delete)</div>
+                    <div class="idx-card-desc">Remove an external entity ID from the active index.</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
             del_id = st.number_input("External ID to delete:", min_value=1, max_value=999999, value=int(add_id), step=1)
 
-            if st.button("Commit Tombstone Deletion", use_container_width=True):
+            if st.button("Commit Vector Deletion", use_container_width=True):
                 try:
                     del_cnt = session.delete_vector(int(del_id))
                     if del_cnt > 0:
-                        st.success(f"Tombstoned ID {del_id}. Searchable records remaining: {session.active_count}")
+                        st.session_state["mutation_flash"] = (
+                            "success",
+                            f"Deleted vector ID {del_id}. Searchable records remaining: {session.active_count}",
+                        )
+                        st.rerun()
                     else:
-                        st.warning(f"ID {del_id} not found in active live set.")
+                        st.warning(f"Vector ID {del_id} not found in active live set (or already deleted).")
                 except Exception as exc:
                     st.error(f"Deletion failed: {exc}")
 
@@ -1332,12 +1401,15 @@ def main() -> None:
             if st.button("📂 Load & Verify Storage", use_container_width=True):
                 try:
                     restored_idx = session.load_named(load_choice_str, verify_checksums=True)
-                    st.success(f"Successfully verified and loaded `{type(restored_idx).__name__}` (`{load_choice_str}`)!")
-
                     # Verification query
                     q_test = np.zeros(session.d, dtype=np.float32)
                     v_res = session.search(q_test, k=3)
-                    st.info(f"Verification query on restored index returned top-3 IDs: `{v_res.ids.tolist()}`")
+                    st.session_state["mutation_flash"] = (
+                        "success",
+                        f"Successfully verified and loaded {type(restored_idx).__name__} ('{load_choice_str}')! Searchable records: {session.active_count}",
+                    )
+                    st.session_state["load_verification_note"] = f"Verification query on restored index returned top-3 IDs: {v_res.ids.tolist()}"
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"Load verification failed: {exc}")
 

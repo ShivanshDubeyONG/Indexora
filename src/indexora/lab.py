@@ -609,6 +609,8 @@ class LabSession:
         self.active_index = loaded
         self.index_name = type(loaded).__name__
         self.d = loaded.d
+        self.added_ids = []
+        self.deleted_ids = []
         return loaded
 
     def list_saved(self) -> list[str]:
@@ -656,7 +658,8 @@ class LabSession:
         id_arr = None if ext_id is None else np.array([ext_id], dtype=np.int64)
         assigned_ids = self.active_index.add(vec, ids=id_arr)
         assigned_id = int(assigned_ids[0])
-        self.added_ids.append(assigned_id)
+        if assigned_id not in self.added_ids:
+            self.added_ids.append(assigned_id)
         if assigned_id in self.deleted_ids:
             self.deleted_ids.remove(assigned_id)
         return assigned_id
@@ -676,7 +679,8 @@ class LabSession:
         """
         del_count = self.active_index.delete([ext_id])
         if del_count > 0:
-            self.deleted_ids.append(ext_id)
+            if ext_id not in self.deleted_ids:
+                self.deleted_ids.append(ext_id)
             if ext_id in self.added_ids:
                 self.added_ids.remove(ext_id)
         return del_count
@@ -762,4 +766,6 @@ class LabSession:
         self.active_index = loaded
         self.index_name = type(loaded).__name__
         self.d = loaded.d
+        self.added_ids = []
+        self.deleted_ids = []
         return loaded
