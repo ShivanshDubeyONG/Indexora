@@ -517,3 +517,118 @@ def test_exact_search_query_chunking_bounds():
         exact_search(queries, database, max_query_chunk=0)
     with pytest.raises(ValueError, match="max_query_chunk must be a positive integer"):
         exact_search_blas(queries, database, max_query_chunk=-3)
+
+
+def test_exact_search_blocked_database_chunking_equivalence():
+    """Verify blocked GEMM across database chunks matches reference oracle bit-for-bit."""
+    rng = np.random.default_rng(303)
+    N, d, Q = 150, 16, 20
+    database = rng.standard_normal((N, d)).astype(np.float32)
+    queries = rng.standard_normal((Q, d)).astype(np.float32)
+    ids = np.arange(100, 100 + N, dtype=np.int64)
+
+    # Reference exact search
+    ref_res = exact_search(queries, database, ids=ids, k=10)
+
+    # Blocked BLAS search with multiple chunk sizes smaller than N
+    for db_chunk in [17, 30, 50, 75]:
+        blas_res = exact_search_blas(queries, database, ids=ids, k=10, max_db_chunk=db_chunk)
+        np.testing.assert_array_equal(blas_res.ids, ref_res.ids)
+        np.testing.assert_allclose(blas_res.distances, ref_res.distances, rtol=1e-4, atol=1e-4)
+
+
+def test_exact_search_blocked_gemm_deterministic_tie_breaking():
+    """Verify equidistant candidates in different database chunks break ties by ascending ID."""
+    # 4 points with identical distances to [0, 0] distributed across chunks of size 2
+    database = np.array(
+        [
+            [1.0, 0.0],  # ID 999, dist=1.0 (chunk 0)
+            [0.0, 1.0],  # ID 500, dist=1.0 (chunk 0)
+            [-1.0, 0.0], # ID 20,  dist=1.0 (chunk 1)
+            [0.0, -1.0], # ID 100, dist=1.0 (chunk 1)
+        ],
+        dtype=np.float32,
+    )
+    ids = np.array([999, 500, 20, 100], dtype=np.int64)
+    query = np.array([[0.0, 0.0]], dtype=np.float32)
+
+    # With max_db_chunk=2, chunk 0 has [999, 500], chunk 1 has [20, 100]
+    ref_k2 = exact_search(query, database, ids=ids, k=2)
+    blas_k2 = exact_search_blas(query, database, ids=ids, k=2, max_db_chunk=2)
+
+    # Smallest IDs among tied candidates: 20, 100
+    np.testing.assert_array_equal(blas_k2.ids, ref_k2.ids)
+    np.testing.assert_array_equal(blas_k2.ids, np.array([[20, 100]], dtype=np.int64))
+
+    ref_k4 = exact_search(query, database, ids=ids, k=4)
+    blas_k4 = exact_search_blas(query, database, ids=ids, k=4, max_db_chunk=2)
+    np.testing.assert_array_equal(blas_k4.ids, ref_k4.ids)
+    np.testing.assert_array_equal(blas_k4.ids, np.array([[20, 100, 500, 999]], dtype=np.int64))
+
+
+def test_exact_blas_index_add_delete_norm_consistency():
+    """Verify ExactBlasIndex maintains exact norm consistency and search equivalence after add/delete."""
+    rng = np.random.default_rng(404)
+    N, d = 40, 8
+    X = rng.standard_normal((N, d)).astype(np.float32)
+    ids = np.arange(N, dtype=np.int64)
+
+    index = ExactBlasIndex(X, ids=ids)
+    np.testing.assert_allclose(index._db_norms, np.sum(index._database ** 2, axis=1), rtol=1e-5)
+
+    # 1. Add vectors
+    new_X = rng.standard_normal((10, d)).astype(np.float32)
+    new_ids = np.arange(100, 110, dtype=np.int64)
+    index.add(new_X, ids=new_ids)
+    assert len(index) == 50
+    np.testing.assert_allclose(index._db_norms, np.sum(index._database ** 2, axis=1), rtol=1e-5)
+
+    # 2. Delete vectors
+    deleted = index.delete([100, 101, 102, 5, 10])
+    assert deleted == 5
+    assert len(index) == 45
+    np.testing.assert_allclose(index._db_norms, np.sum(index._database ** 2, axis=1), rtol=1e-5)
+
+    # 3. Search equivalence against a fresh index and reference flat index
+    queries = rng.standard_normal((5, d)).astype(np.float32)
+    fresh_blas = ExactBlasIndex(index.database, ids=index.ids)
+    fresh_flat = ExactFlatIndex(index.database, ids=index.ids)
+
+    res_mut = index.search(queries, k=5, max_db_chunk=15)
+    res_fresh = fresh_blas.search(queries, k=5, max_db_chunk=15)
+    res_flat = fresh_flat.search(queries, k=5)
+
+    np.testing.assert_array_equal(res_mut.ids, res_fresh.ids)
+    np.testing.assert_array_equal(res_mut.ids, res_flat.ids)
+    np.testing.assert_allclose(res_mut.distances, res_fresh.distances, rtol=1e-5)
+
+
+def test_exact_search_blocked_randomized_stress():
+    """Randomized stress tests comparing blocked GEMM BLAS against exact reference oracle."""
+    rng = np.random.default_rng(505)
+    for trial in range(5):
+        N = rng.integers(60, 150)
+        d = rng.integers(8, 24)
+        Q = rng.integers(5, 15)
+        k = rng.integers(3, 12)
+        chunk = rng.integers(11, 35)
+
+        db = rng.standard_normal((N, d)).astype(np.float32)
+        queries = rng.standard_normal((Q, d)).astype(np.float32)
+        ids = rng.choice(10000, size=N, replace=False).astype(np.int64)
+
+        ref_res = exact_search(queries, db, ids=ids, k=k)
+        blas_res = exact_search_blas(queries, db, ids=ids, k=k, max_db_chunk=chunk)
+
+        np.testing.assert_array_equal(
+            blas_res.ids,
+            ref_res.ids,
+            err_msg=f"Trial {trial} failed ID agreement: N={N}, d={d}, Q={Q}, k={k}, chunk={chunk}",
+        )
+        np.testing.assert_allclose(
+            blas_res.distances,
+            ref_res.distances,
+            rtol=1e-4,
+            atol=1e-4,
+            err_msg=f"Trial {trial} failed distance agreement",
+        )

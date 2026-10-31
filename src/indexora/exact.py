@@ -500,46 +500,37 @@ def exact_search_blas(
                 batch_distances[q_start + i] = res.distances
                 batch_ids[q_start + i] = res.ids
         else:
-            running_d = None
-            running_i = None
+            # Maintain running top-k per query across database chunks using select_top_k
+            # to guarantee 100% deterministic (distance, ID) tie-breaking at chunk boundaries.
+            running_dists: list[np.ndarray | None] = [None] * q_count
+            running_ids: list[np.ndarray | None] = [None] * q_count
+
             for db_start in range(0, num_database, max_db_chunk):
                 db_end = min(db_start + max_db_chunk, num_database)
                 db_chunk = database[db_start:db_end]
                 db_norm_chunk = db_norms[None, db_start:db_end]
                 id_chunk = ids_arr[db_start:db_end]
 
+                # Fast Level-3 BLAS GEMM for this (q_chunk, db_chunk) block
                 dot = q_chunk @ db_chunk.T
                 chunk_d = q_norm_chunk + db_norm_chunk - 2.0 * dot
                 np.maximum(chunk_d, 0.0, out=chunk_d)
 
-                curr_k = min(k, db_end - db_start)
-                if curr_k < chunk_d.shape[1]:
-                    cand_idx = np.argpartition(chunk_d, curr_k - 1, axis=1)[:, :curr_k]
-                    cand_d = chunk_d[row_idx, cand_idx]
-                    cand_i = id_chunk[cand_idx]
-                else:
-                    cand_d = chunk_d
-                    cand_i = np.broadcast_to(id_chunk[None, :], (q_count, id_chunk.shape[0]))
-
-                if running_d is None:
-                    running_d = cand_d
-                    running_i = cand_i
-                else:
-                    merged_d = np.concatenate([running_d, cand_d], axis=1)
-                    merged_i = np.concatenate([running_i, cand_i], axis=1)
-                    keep_k = min(k, merged_d.shape[1])
-                    if keep_k < merged_d.shape[1]:
-                        part_idx = np.argpartition(merged_d, keep_k - 1, axis=1)[:, :keep_k]
-                        running_d = merged_d[row_idx, part_idx]
-                        running_i = merged_i[row_idx, part_idx]
+                for i in range(q_count):
+                    c_topk = select_top_k(chunk_d[i], id_chunk, k=k)
+                    if running_dists[i] is None:
+                        running_dists[i] = c_topk.distances
+                        running_ids[i] = c_topk.ids
                     else:
-                        running_d = merged_d
-                        running_i = merged_i
+                        m_dists = np.concatenate([running_dists[i], c_topk.distances])
+                        m_ids = np.concatenate([running_ids[i], c_topk.ids])
+                        m_topk = select_top_k(m_dists, m_ids, k=k)
+                        running_dists[i] = m_topk.distances
+                        running_ids[i] = m_topk.ids
 
             for i in range(q_count):
-                order = np.lexsort((running_i[i], running_d[i]))[:k_eff]
-                batch_distances[q_start + i] = running_d[i, order]
-                batch_ids[q_start + i] = running_i[i, order]
+                batch_distances[q_start + i] = running_dists[i]
+                batch_ids[q_start + i] = running_ids[i]
 
     batch_mask = np.ones_like(batch_ids, dtype=bool)
     total_dc = num_queries * num_database
