@@ -1362,7 +1362,7 @@ def main() -> None:
                     st.warning("Distance plot artifact not found at results/sift100k_p66/recall_vs_distance_computations.png")
 
             # Benchmark Summary Table
-            st.markdown("#### Complete Traceable Summary Table (`benchmark_summary.csv`)")
+            st.markdown("#### SIFT-100K Baseline & IVF-Flat Benchmark (`results/sift100k_p66/`)")
             summary_csv_path = Path("results/sift100k_p66/benchmark_summary.csv")
             if summary_csv_path.exists():
                 df_sift = pd.read_csv(summary_csv_path)
@@ -1394,6 +1394,85 @@ def main() -> None:
                 st.dataframe(df_display, use_container_width=True)
             else:
                 st.warning("Benchmark CSV artifact not found at results/sift100k_p66/benchmark_summary.csv")
+
+            # SIFT-100K IVF-PQ Compression Benchmark
+            st.markdown("#### SIFT-100K IVF-PQ Memory Compression Benchmark (`results/sift100k_ivfpq/`)")
+            st.caption(
+                "Evaluates IVFPQIndex on all 100,000 SIFT base vectors ($d=128$, $M=16$, $k_{\\text{sub}}=256$, $n_{\\text{list}}=100$) "
+                "with 1,000 queries. Index storage is **2.46 MiB (25.8 bytes/vector)** vs. 51.2 MiB for raw float32 vectors (**20.8× memory compression**)."
+            )
+            ivfpq_csv_path = Path("results/sift100k_ivfpq/benchmark_summary.csv")
+            if ivfpq_csv_path.exists():
+                df_ivfpq = pd.read_csv(ivfpq_csv_path)
+                ivfpq_cols = [
+                    "index_name",
+                    "nlist",
+                    "M",
+                    "k_sub",
+                    "nprobe",
+                    "recall_at_k",
+                    "per_query_p50_ms",
+                    "batch_qps",
+                    "distance_computations",
+                    "index_mem_mib",
+                    "bytes_per_vec",
+                ]
+                df_ivfpq_disp = df_ivfpq[ivfpq_cols].copy()
+                df_ivfpq_disp.columns = [
+                    "Index",
+                    "nlist",
+                    "M Subspaces",
+                    "k_sub",
+                    "nprobe",
+                    "Recall@10",
+                    "p50 Latency (ms)",
+                    "Throughput (QPS)",
+                    "LUT Lookups / Query",
+                    "Index RAM (MiB)",
+                    "Bytes / Vec",
+                ]
+                st.dataframe(df_ivfpq_disp, use_container_width=True)
+            else:
+                st.info("Run SIFT benchmark suite to generate IVF-PQ scale results.")
+
+            # SIFT-10K HNSW Proximity Graph Benchmark
+            st.markdown("#### SIFT-10K HNSW Proximity Graph Benchmark (`results/sift10k_hnsw/`)")
+            st.caption(
+                "Evaluates HNSWIndex on the **SIFT-10K subset** (first 10,000 base vectors, $d=128$, $M=16$, $ef_{\\text{construction}}=64$) "
+                "with 1,000 queries against exact subset ground truth. HNSW is evaluated on 10K to respect pure-Python interpreter graph-traversal constraints "
+                "while demonstrating sub-linear distance evaluations and high recall (>94%–99%)."
+            )
+            hnsw_csv_path = Path("results/sift10k_hnsw/benchmark_summary.csv")
+            if hnsw_csv_path.exists():
+                df_hnsw = pd.read_csv(hnsw_csv_path)
+                hnsw_cols = [
+                    "index_name",
+                    "M",
+                    "ef_construction",
+                    "ef_search",
+                    "recall_at_k",
+                    "per_query_p50_ms",
+                    "batch_qps",
+                    "distance_computations",
+                    "index_mem_mib",
+                    "bytes_per_vec",
+                ]
+                df_hnsw_disp = df_hnsw[hnsw_cols].copy()
+                df_hnsw_disp.columns = [
+                    "Index",
+                    "M Degree",
+                    "ef_construction",
+                    "ef_search",
+                    "Recall@10",
+                    "p50 Latency (ms)",
+                    "Throughput (QPS)",
+                    "Distance Ops / Query",
+                    "Index RAM (MiB)",
+                    "Bytes / Vec",
+                ]
+                st.dataframe(df_hnsw_disp, use_container_width=True)
+            else:
+                st.info("Run SIFT benchmark suite to generate HNSW scale results.")
 
             st.markdown(
                 """

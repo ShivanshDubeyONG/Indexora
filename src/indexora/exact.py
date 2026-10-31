@@ -113,6 +113,7 @@ def _exact_search_single_incremental_blas(
     ids: np.ndarray,
     k: int,
     max_db_chunk: int,
+    db_norms: np.ndarray | None = None,
 ) -> SearchResult:
     """Perform BLAS exact search for a single query by consuming database blocks incrementally.
 
@@ -122,12 +123,20 @@ def _exact_search_single_incremental_blas(
     running_dists: np.ndarray | None = None
     running_ids: np.ndarray | None = None
     num_database = database.shape[0]
+    q_norm = float(np.sum(query * query))
 
     for start in range(0, num_database, max_db_chunk):
         end = min(start + max_db_chunk, num_database)
         db_chunk = database[start:end]
         id_chunk = ids[start:end]
-        chunk_dists = pairwise_squared_l2_blas(query, db_chunk)
+        if db_norms is not None:
+            db_norm_chunk = db_norms[start:end]
+        else:
+            db_norm_chunk = np.sum(db_chunk * db_chunk, axis=1).astype(np.float32)
+
+        dot = query @ db_chunk.T
+        chunk_dists = q_norm + db_norm_chunk - 2.0 * dot
+        np.maximum(chunk_dists, 0.0, out=chunk_dists)
         chunk_topk = select_top_k(chunk_dists, id_chunk, k=k)
 
         if running_dists is None:
@@ -329,6 +338,7 @@ def exact_search_blas(
     max_db_chunk: int = 32768,
     max_query_chunk: int = 1024,
     filter_ids: Sequence[int] | set[int] | np.ndarray | Callable[[int], bool] | None = None,
+    db_norms: np.ndarray | None = None,
 ) -> SearchResult:
     """Perform exhaustive exact nearest-neighbor search accelerated via BLAS matrix multiplication.
 
@@ -399,6 +409,10 @@ def exact_search_blas(
 
     if filter_ids is not None:
         database, ids_arr, num_database = _filter_database_by_ids(database, ids_arr, filter_ids)
+        db_norms = None
+
+    if db_norms is None:
+        db_norms = np.sum(database * database, axis=1).astype(np.float32) if num_database > 0 else np.empty((0,), dtype=np.float32)
 
     is_single_query = queries.ndim == 1
     if is_single_query:
@@ -412,7 +426,10 @@ def exact_search_blas(
                 candidate_distance_computations=0,
             )
         if num_database <= max_db_chunk:
-            distances = pairwise_squared_l2_blas(queries, database)
+            q_norm = float(np.sum(queries * queries))
+            dot = queries @ database.T
+            distances = q_norm + db_norms - 2.0 * dot
+            np.maximum(distances, 0.0, out=distances)
             res = select_top_k(distances, ids_arr, k=k)
             return SearchResult(
                 distances=res.distances,
@@ -423,7 +440,7 @@ def exact_search_blas(
                 candidate_distance_computations=num_database,
             )
         res = _exact_search_single_incremental_blas(
-            queries, database, ids_arr, k=k, max_db_chunk=max_db_chunk
+            queries, database, ids_arr, k=k, max_db_chunk=max_db_chunk, db_norms=db_norms
         )
         return SearchResult(
             distances=res.distances,
@@ -464,24 +481,65 @@ def exact_search_blas(
     batch_distances = np.empty((num_queries, k_eff), dtype=np.float32)
     batch_ids = np.empty((num_queries, k_eff), dtype=np.int64)
 
+    # Precalculate query norms once: shape (num_queries, 1)
+    q_norms = np.sum(queries * queries, axis=1, keepdims=True).astype(np.float32)
+
     for q_start in range(0, num_queries, max_query_chunk):
         q_end = min(q_start + max_query_chunk, num_queries)
         q_chunk = queries[q_start:q_end]
+        q_norm_chunk = q_norms[q_start:q_end]
         q_count = q_end - q_start
+        row_idx = np.arange(q_count)[:, None]
 
         if num_database <= max_db_chunk:
-            chunk_distances = pairwise_squared_l2_blas(q_chunk, database)
+            dot = q_chunk @ database.T
+            chunk_distances = q_norm_chunk + db_norms[None, :] - 2.0 * dot
+            np.maximum(chunk_distances, 0.0, out=chunk_distances)
             for i in range(q_count):
                 res = select_top_k(chunk_distances[i], ids_arr, k=k)
                 batch_distances[q_start + i] = res.distances
                 batch_ids[q_start + i] = res.ids
         else:
+            running_d = None
+            running_i = None
+            for db_start in range(0, num_database, max_db_chunk):
+                db_end = min(db_start + max_db_chunk, num_database)
+                db_chunk = database[db_start:db_end]
+                db_norm_chunk = db_norms[None, db_start:db_end]
+                id_chunk = ids_arr[db_start:db_end]
+
+                dot = q_chunk @ db_chunk.T
+                chunk_d = q_norm_chunk + db_norm_chunk - 2.0 * dot
+                np.maximum(chunk_d, 0.0, out=chunk_d)
+
+                curr_k = min(k, db_end - db_start)
+                if curr_k < chunk_d.shape[1]:
+                    cand_idx = np.argpartition(chunk_d, curr_k - 1, axis=1)[:, :curr_k]
+                    cand_d = chunk_d[row_idx, cand_idx]
+                    cand_i = id_chunk[cand_idx]
+                else:
+                    cand_d = chunk_d
+                    cand_i = np.broadcast_to(id_chunk[None, :], (q_count, id_chunk.shape[0]))
+
+                if running_d is None:
+                    running_d = cand_d
+                    running_i = cand_i
+                else:
+                    merged_d = np.concatenate([running_d, cand_d], axis=1)
+                    merged_i = np.concatenate([running_i, cand_i], axis=1)
+                    keep_k = min(k, merged_d.shape[1])
+                    if keep_k < merged_d.shape[1]:
+                        part_idx = np.argpartition(merged_d, keep_k - 1, axis=1)[:, :keep_k]
+                        running_d = merged_d[row_idx, part_idx]
+                        running_i = merged_i[row_idx, part_idx]
+                    else:
+                        running_d = merged_d
+                        running_i = merged_i
+
             for i in range(q_count):
-                res = _exact_search_single_incremental_blas(
-                    q_chunk[i], database, ids_arr, k=k, max_db_chunk=max_db_chunk
-                )
-                batch_distances[q_start + i] = res.distances
-                batch_ids[q_start + i] = res.ids
+                order = np.lexsort((running_i[i], running_d[i]))[:k_eff]
+                batch_distances[q_start + i] = running_d[i, order]
+                batch_ids[q_start + i] = running_i[i, order]
 
     batch_mask = np.ones_like(batch_ids, dtype=bool)
     total_dc = num_queries * num_database
@@ -582,6 +640,11 @@ class ExactFlatIndex:
             self._ids = _validate_ids(ids, expected_n=database.shape[0])
 
         self._database = database
+        self._db_norms = (
+            np.sum(database * database, axis=1).astype(np.float32)
+            if database.shape[0] > 0
+            else np.empty((0,), dtype=np.float32)
+        )
 
     @property
     def database(self) -> np.ndarray:
@@ -706,12 +769,15 @@ class ExactFlatIndex:
                 raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
             new_ids = np.ascontiguousarray(ids)
 
+        new_norms = np.sum(vectors * vectors, axis=1).astype(np.float32)
         if self._database.shape[0] == 0:
             self._database = vectors
             self._ids = new_ids
+            self._db_norms = new_norms
         else:
             self._database = np.concatenate([self._database, vectors], axis=0)
             self._ids = np.concatenate([self._ids, new_ids], axis=0)
+            self._db_norms = np.concatenate([self._db_norms, new_norms], axis=0)
         return new_ids
 
     def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
@@ -742,6 +808,7 @@ class ExactFlatIndex:
         if deleted_count > 0:
             self._database = np.ascontiguousarray(self._database[mask_keep])
             self._ids = np.ascontiguousarray(self._ids[mask_keep])
+            self._db_norms = np.ascontiguousarray(self._db_norms[mask_keep])
         return deleted_count
 
     def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:
@@ -822,6 +889,11 @@ class ExactBlasIndex:
             self._ids = _validate_ids(ids, expected_n=database.shape[0])
 
         self._database = database
+        self._db_norms = (
+            np.sum(database * database, axis=1).astype(np.float32)
+            if database.shape[0] > 0
+            else np.empty((0,), dtype=np.float32)
+        )
 
     @property
     def database(self) -> np.ndarray:
@@ -888,6 +960,7 @@ class ExactBlasIndex:
             max_db_chunk=max_db_chunk,
             max_query_chunk=max_query_chunk,
             filter_ids=filter_ids,
+            db_norms=self._db_norms,
         )
 
     def add(
@@ -950,12 +1023,15 @@ class ExactBlasIndex:
                 raise ValueError(f"ID conflict: ID {conflicts[0]} already exists in the index.")
             new_ids = np.ascontiguousarray(ids)
 
+        new_norms = np.sum(vectors * vectors, axis=1).astype(np.float32)
         if self._database.shape[0] == 0:
             self._database = vectors
             self._ids = new_ids
+            self._db_norms = new_norms
         else:
             self._database = np.concatenate([self._database, vectors], axis=0)
             self._ids = np.concatenate([self._ids, new_ids], axis=0)
+            self._db_norms = np.concatenate([self._db_norms, new_norms], axis=0)
         return new_ids
 
     def delete(self, ids: Sequence[int] | np.ndarray | int) -> int:
@@ -986,6 +1062,7 @@ class ExactBlasIndex:
         if deleted_count > 0:
             self._database = np.ascontiguousarray(self._database[mask_keep])
             self._ids = np.ascontiguousarray(self._ids[mask_keep])
+            self._db_norms = np.ascontiguousarray(self._db_norms[mask_keep])
         return deleted_count
 
     def save(self, path: str | Path, overwrite: bool = True) -> dict[str, Any]:

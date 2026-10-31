@@ -39,6 +39,8 @@ benchmarks/results/
 benchmark_output/
 results/*
 !results/sift100k_p66/
+!results/sift100k_ivfpq/
+!results/sift10k_hnsw/
 *.prof
 
 # Datasets and local array caches
@@ -60,3 +62,6 @@ storage/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Temporary scratch scripts
+scratch/

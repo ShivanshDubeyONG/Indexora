@@ -1,0 +1,5 @@
+index_name,M,ef_construction,ef_search,build_time_sec,index_mem_mib,bytes_per_vec,peak_rss_mib,per_query_p50_ms,per_query_p95_ms,per_query_p99_ms,per_query_mean_ms,per_query_std_ms,batch_qps,recall_at_k,dist_aware_recall,distance_computations
+hnsw,16,64,16,258.8182,7.48,784.7,150.36,2.295,3.651,4.206,2.372,0.713,396.8,0.9423,0.9423,374.5
+hnsw,16,64,32,258.8182,7.48,784.7,150.39,3.572,5.319,6.38,3.515,1.118,276.1,0.973,0.973,545.2
+hnsw,16,64,64,258.8182,7.48,784.7,150.39,5.676,7.538,9.953,5.539,1.598,176.6,0.9881,0.9881,814.5
+hnsw,16,64,128,258.8182,7.48,784.7,150.39,8.321,11.672,17.006,8.257,2.427,113.8,0.9944,0.9944,1214.5
