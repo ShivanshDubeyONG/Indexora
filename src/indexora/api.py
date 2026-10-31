@@ -8,6 +8,7 @@ Serves the React + TypeScript frontend statically when built in production.
 from __future__ import annotations
 
 from dataclasses import asdict
+import csv
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,6 @@ import time
 from typing import Any, List, Optional
 
 import numpy as np
-import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -502,23 +502,37 @@ def get_sift_evidence() -> dict[str, Any]:
         "sift10k_hnsw": [],
     }
 
+    def _read_csv(p: Path) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        if not p.exists():
+            return records
+        with open(p, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                parsed: dict[str, Any] = {}
+                for k, v in row.items():
+                    if v is None:
+                        parsed[k] = None
+                        continue
+                    v_str = str(v).strip()
+                    try:
+                        if "." in v_str:
+                            parsed[k] = float(v_str)
+                        else:
+                            parsed[k] = int(v_str)
+                    except ValueError:
+                        parsed[k] = v_str
+                records.append(parsed)
+        return records
+
     # 1. SIFT-100K Baseline & IVF-Flat
-    p_base = Path("results/sift100k_p66/benchmark_summary.csv")
-    if p_base.exists():
-        df = pd.read_csv(p_base)
-        evidence["sift100k_baseline"] = df.to_dict(orient="records")
+    evidence["sift100k_baseline"] = _read_csv(Path("results/sift100k_p66/benchmark_summary.csv"))
 
     # 2. SIFT-100K IVF-PQ
-    p_ivfpq = Path("results/sift100k_ivfpq/benchmark_summary.csv")
-    if p_ivfpq.exists():
-        df = pd.read_csv(p_ivfpq)
-        evidence["sift100k_ivfpq"] = df.to_dict(orient="records")
+    evidence["sift100k_ivfpq"] = _read_csv(Path("results/sift100k_ivfpq/benchmark_summary.csv"))
 
     # 3. SIFT-10K HNSW
-    p_hnsw = Path("results/sift10k_hnsw/benchmark_summary.csv")
-    if p_hnsw.exists():
-        df = pd.read_csv(p_hnsw)
-        evidence["sift10k_hnsw"] = df.to_dict(orient="records")
+    evidence["sift10k_hnsw"] = _read_csv(Path("results/sift10k_hnsw/benchmark_summary.csv"))
 
     return evidence
 
