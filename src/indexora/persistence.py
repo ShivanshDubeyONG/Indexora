@@ -60,7 +60,11 @@ def _load_and_validate_array(
     verify_checksums: bool = True,
 ) -> np.ndarray:
     """Load and validate a numpy array from an index directory."""
-    filepath = directory / filename
+    dir_resolved = directory.resolve()
+    filepath = (directory / filename).resolve()
+    if not filepath.is_relative_to(dir_resolved):
+        raise ValueError(f"Path traversal detected in manifest filename: '{filename}'")
+
     if not filepath.exists():
         raise FileNotFoundError(f"Required index array file '{filename}' not found in {directory}")
 
@@ -605,6 +609,12 @@ def load_index(
         raise ValueError(
             f"Unsupported schema version: expected '{SCHEMA_VERSION}', got '{manifest.get('schema_version')}'"
         )
+
+    # Path traversal protection across all declared array filenames
+    path_resolved = path.resolve()
+    for fname in manifest.get("arrays", {}):
+        if not (path / fname).resolve().is_relative_to(path_resolved):
+            raise ValueError(f"Path traversal detected in manifest filename: '{fname}'")
 
     index_type = manifest.get("index_type")
     if index_type == "ExactFlatIndex":

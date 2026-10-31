@@ -177,6 +177,8 @@ Indexora implements a custom, pickle-free binary storage format designed for cro
 4. **Zero Re-indexing:**
    - HNSW graphs are restored directly into adjacency structures without graph rebuilding.
    - IVF-PQ indexes restore coarse centroids and subspace codebooks without retraining.
+5. **Path Traversal Hardening:**
+   - During `load_index`, all declared array filenames in `manifest.json` are resolved and verified to be strictly contained within the index directory via `filepath.is_relative_to(index_dir)`, preventing path traversal vulnerability attacks.
 
 ---
 

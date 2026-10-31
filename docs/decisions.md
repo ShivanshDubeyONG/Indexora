@@ -449,3 +449,33 @@ To establish release readiness for Indexora v0.1, the evaluation harness require
 - Complete ID integrity: all valid `int64` entity IDs are supported across exact search, IVF search, and recall evaluation.
 - Realistic benchmarks: headline plots reflect per-query latency trade-offs on real or synthetic data.
 - Reproducible, honest accounting with transparent release criteria.
+
+
+---
+
+## ADR-0009: Phase 11 Hardening — Path Traversal Protection and Manifest Array Validation
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Decision Owner:** Release Engineering & Security Hardening
+
+### 1. Context
+Indexora persistence stores index metadata in `manifest.json` and associated vector/cluster arrays in raw NumPy `.npy` files referenced by relative filenames in `manifest["arrays"]`. During index loading (`load_index` and `_load_and_validate_array`), array filenames were previously joined with the base index directory without explicitly asserting that the resolved path remained strictly confined within the directory hierarchy. A maliciously crafted or tampered `manifest.json` containing path traversal components (e.g., `../../outside.npy`) could attempt to read or inspect arbitrary files accessible to the host process.
+
+### 2. Decisions
+
+1. **Strict Root Containment Validation:**
+   - Both `_load_and_validate_array` and the top-level `load_index` dispatch function resolve the target base directory (`path.resolve()`) and every declared array filename `(path / fname).resolve()`.
+   - Validation enforces `filepath.is_relative_to(path_resolved)`.
+   - Any attempt to escape the index directory immediately raises `ValueError("Path traversal detected in manifest filename: ...")` before attempting file access or deserialization.
+
+2. **Defense in Depth Across Deserializers:**
+   - The validation runs eagerly across all keys in `manifest["arrays"]` before dispatching to specific index deserializers (`_deserialize_exact_flat`, `_deserialize_hnsw`, etc.), as well as defensively within `_load_and_validate_array`.
+
+3. **Regression Test Suite Coverage:**
+   - Added `test_persistence_path_traversal_detection` in `tests/test_persistence.py` to ensure corrupted or malicious manifests targeting parent paths fail deterministically with `ValueError`.
+
+### 3. Consequences & Invariants
+- Safe index deserialization: Loading an untrusted index directory cannot escape into parent directories or read outside files.
+- Preserves zero external dependencies and zero-overhead pickle-free `.npy` storage format.
+- Backward compatibility: Completely transparent to all valid `indexora` indexes created via `save_index`.

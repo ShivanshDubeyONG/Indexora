@@ -219,3 +219,23 @@ def test_persistence_empty_index_roundtrip(tmp_path):
     loaded_idx = ExactFlatIndex.load(save_dir)
     assert len(loaded_idx) == 0
     assert loaded_idx.ntotal == 0
+
+
+def test_persistence_path_traversal_detection(tmp_path):
+    """Manifest referencing filenames outside the directory raises ValueError."""
+    save_dir = tmp_path / "traversal_index"
+    save_dir.mkdir()
+    manifest_data = {
+        "format": "indexora_index",
+        "schema_version": "1.0",
+        "index_type": "ExactFlatIndex",
+        "d": 8,
+        "ntotal": 1,
+        "arrays": {
+            "../outside.npy": {"shape": [1, 8], "dtype": "float32", "sha256": "fake"}
+        }
+    }
+    (save_dir / "manifest.json").write_text(json.dumps(manifest_data))
+
+    with pytest.raises(ValueError, match="Path traversal detected"):
+        load_index(save_dir)
