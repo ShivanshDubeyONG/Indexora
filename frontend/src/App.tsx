@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Navigation, NavTabId } from './components/Navigation';
 import { Footer } from './components/Footer';
+import { CommandPalette } from './components/CommandPalette';
 import { OverviewView } from './views/OverviewView';
 import { SearchLabView } from './views/SearchLabView';
 import { BenchmarkStudioView } from './views/BenchmarkStudioView';
@@ -16,6 +17,33 @@ export const App: React.FC = () => {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [dataset, setDataset] = useState<DatasetCurrent | null>(null);
   const [loading, setLoading] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return (
+        localStorage.getItem('indexora_theme') === 'dark' ||
+        (!('indexora_theme' in localStorage) &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches)
+      );
+    }
+    return false;
+  });
+
+  const toggleTheme = () => {
+    setIsDark((prev) => {
+      const next = !prev;
+      const root = document.documentElement;
+      if (next) {
+        root.classList.add('dark');
+        localStorage.setItem('indexora_theme', 'dark');
+      } else {
+        root.classList.remove('dark');
+        localStorage.setItem('indexora_theme', 'light');
+      }
+      return next;
+    });
+  };
 
   const loadState = async () => {
     setLoading(true);
@@ -37,9 +65,47 @@ export const App: React.FC = () => {
     loadState();
   }, []);
 
+  // Global Keyboard Shortcuts (Ctrl+K, 1-6 tabs, D theme, R refresh)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Toggle Command Palette (Cmd+K or Ctrl+K)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // If user is actively typing in an input or textarea, do not intercept keys
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT'
+      );
+      if (isInput) return;
+
+      if (e.key === '1') setActiveTab('overview');
+      else if (e.key === '2') setActiveTab('search');
+      else if (e.key === '3') setActiveTab('benchmarks');
+      else if (e.key === '4') setActiveTab('explorer');
+      else if (e.key === '5') setActiveTab('management');
+      else if (e.key === '6') setActiveTab('semantic');
+      else if (e.key.toLowerCase() === 'd') toggleTheme();
+      else if (e.key.toLowerCase() === 'r') loadState();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
-    <div className="min-h-screen flex flex-col bg-surface text-graphite antialiased font-sans selection:bg-accent/20 selection:text-accent">
-      <Header status={status} loading={loading} onRefresh={loadState} />
+    <div className="min-h-screen flex flex-col bg-surface text-graphite antialiased font-sans selection:bg-accent/20 selection:text-accent transition-colors">
+      <Header
+        status={status}
+        loading={loading}
+        onRefresh={loadState}
+        onOpenPalette={() => setPaletteOpen(true)}
+      />
       <Navigation activeTab={activeTab} onChangeTab={setActiveTab} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -77,6 +143,19 @@ export const App: React.FC = () => {
       </main>
 
       <Footer />
+
+      {/* Global Command Palette */}
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onSelectTab={(tab) => {
+          setActiveTab(tab);
+          setPaletteOpen(false);
+        }}
+        onToggleTheme={toggleTheme}
+        onRefresh={loadState}
+        isDark={isDark}
+      />
     </div>
   );
 };

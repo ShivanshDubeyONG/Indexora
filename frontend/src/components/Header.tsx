@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { SystemStatus } from '../types';
 import { Logo } from './Logo';
-import { Cpu, Database, Activity, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Cpu, Database, Activity, RefreshCw, Sun, Moon, Search } from 'lucide-react';
 
 interface HeaderProps {
   status: SystemStatus | null;
   loading: boolean;
   onRefresh: () => void;
+  onOpenPalette?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ status, loading, onRefresh }) => {
+export const Header: React.FC<HeaderProps> = ({
+  status,
+  loading,
+  onRefresh,
+  onOpenPalette
+}) => {
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return (
@@ -54,6 +60,20 @@ export const Header: React.FC<HeaderProps> = ({ status, loading, onRefresh }) =>
             </p>
           </div>
         </div>
+
+        {/* Command Launcher Pill */}
+        {onOpenPalette && (
+          <button
+            onClick={onOpenPalette}
+            className="hidden lg:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-surface-subtle hover:bg-surface-secondary border border-border text-xs text-graphite-muted hover:text-graphite transition-all cursor-pointer font-sans shadow-subtle"
+          >
+            <Search className="w-3.5 h-3.5 text-accent" />
+            <span className="text-xs">Quick Command Launcher</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border font-mono text-[10px] text-graphite">
+              ⌘K
+            </kbd>
+          </button>
+        )}
 
         {/* Live system state bar & Controls */}
         <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto py-1 text-xs font-mono">

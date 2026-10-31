@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SystemStatus, DatasetCurrent } from '../types';
 import { generateDataset } from '../api';
 import { ArchitectureShowpiece } from '../components/ArchitectureShowpiece';
+import { HardwareMatrix } from '../components/HardwareMatrix';
 import {
   ArrowRight,
   Layers,
@@ -79,6 +80,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ status, dataset, onD
 
       {/* Interactive Architecture Visualizer Showpiece */}
       <ArchitectureShowpiece />
+
+      {/* Systems Hardware & Cache Telemetry Matrix */}
+      <HardwareMatrix />
 
       {/* 2. Multi-Stage Retrieval Pipeline Map */}
       <section className="space-y-4">

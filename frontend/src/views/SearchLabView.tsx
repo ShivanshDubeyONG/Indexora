@@ -1,7 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { executeSearch } from '../api';
 import { SearchResponse, DatasetCurrent } from '../types';
-import { Search, Zap, CheckCircle, AlertTriangle, Filter, Clock, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
+import {
+  Search,
+  Zap,
+  CheckCircle,
+  AlertTriangle,
+  Filter,
+  Clock,
+  CheckCircle2,
+  Sparkles,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Activity,
+  Sliders
+} from 'lucide-react';
 
 interface SearchLabViewProps {
   dataset: DatasetCurrent | null;
@@ -26,6 +40,9 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
   const [evalTimestamp, setEvalTimestamp] = useState<string | null>(null);
   const [evalFlash, setEvalFlash] = useState(false);
   const [flashKey, setFlashKey] = useState(0);
+
+  // Vector Coordinate Inspector State
+  const [inspectedId, setInspectedId] = useState<number | null>(null);
 
   const runSearch = async (isManual = false) => {
     setLoading(true);
@@ -55,8 +72,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
         custom_filter_ids: customIds,
       });
 
-      // If user clicked the button manually, ensure at least 260ms of tactile feedback
-      // so the human eye registers the compute cycle instead of an imperceptible 0.1ms tick
+      // Provide human-perceptible tactile feedback on manual click
       if (isManual) {
         const elapsed = performance.now() - startTime;
         if (elapsed < 260) {
@@ -82,8 +98,11 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
     }
   }, [indexType, queryIndex, k, nprobe, efSearch, filterMode]);
 
+  // Current query vector for vector diff
+  const currentQueryVec = dataset?.query_samples?.[queryIndex]?.vector || [];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 font-sans">
       {/* View Header */}
       <div className="border-b border-border pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -384,7 +403,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
             </div>
           )}
 
-          {/* Results Table with Row Refresh Animation */}
+          {/* Results Table with Row Inspection & Heatstrips */}
           <div className="bg-surface-card border border-border rounded-xl p-5 shadow-card space-y-4 transition-colors">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
@@ -392,7 +411,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                   Retrieved Nearest Neighbors
                 </h3>
                 <span className="text-xs text-graphite-muted">
-                  Sorted deterministically by <code>(distance, external_id)</code>
+                  Click any entity to inspect its float32 vector coordinates & deviation
                 </span>
               </div>
               <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite border border-border">
@@ -407,35 +426,104 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                     <tr>
                       <th className="py-2.5 px-3 font-semibold">Rank</th>
                       <th className="py-2.5 px-3 font-semibold">Entity ID</th>
+                      <th className="py-2.5 px-3 font-semibold text-center">Coordinate Heatstrip</th>
                       <th className="py-2.5 px-3 font-semibold text-right">Squared L2 (||q-x||²)</th>
                       <th className="py-2.5 px-3 font-semibold text-center">Oracle Status</th>
                     </tr>
                   </thead>
                   <tbody key={flashKey} className="divide-y divide-border bg-surface-card text-graphite">
-                    {result.results.map((item, idx) => (
-                      <tr
-                        key={item.id}
-                        className="hover:bg-surface-subtle transition-colors animate-fade-in"
-                        style={{ animationDelay: `${idx * 25}ms` }}
-                      >
-                        <td className="py-2 px-3 font-bold text-graphite">#{item.rank}</td>
-                        <td className="py-2 px-3 font-bold text-accent">{item.id}</td>
-                        <td className="py-2 px-3 text-right text-graphite-muted font-mono">
-                          {item.squared_l2.toFixed(5)}
-                        </td>
-                        <td className="py-2 px-3 text-center">
-                          {item.is_exact_match ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
-                              <CheckCircle className="w-3 h-3" /> Oracle Hit
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-accent font-semibold text-[11px]">
-                              ANN Approximation
-                            </span>
+                    {result.results.map((item, idx) => {
+                      const sample = dataset?.base_samples?.find((s) => s.id === item.id);
+                      const isInspected = inspectedId === item.id;
+                      const vec = sample?.vector || [];
+
+                      return (
+                        <React.Fragment key={item.id}>
+                          <tr
+                            onClick={() => setInspectedId(isInspected ? null : item.id)}
+                            className={`hover:bg-surface-subtle transition-colors cursor-pointer animate-fade-in ${
+                              isInspected ? 'bg-surface-subtle font-semibold' : ''
+                            }`}
+                            style={{ animationDelay: `${idx * 20}ms` }}
+                          >
+                            <td className="py-2.5 px-3 font-bold text-graphite">#{item.rank}</td>
+                            <td className="py-2.5 px-3 font-bold text-accent flex items-center gap-1.5">
+                              <span>{item.id}</span>
+                              {isInspected ? <ChevronUp className="w-3 h-3 text-graphite-subtle" /> : <ChevronDown className="w-3 h-3 text-graphite-subtle opacity-40" />}
+                            </td>
+
+                            {/* Dimensionality Spectrum Sparkline */}
+                            <td className="py-2.5 px-3 text-center">
+                              <div className="inline-flex items-center gap-0.5 bg-surface-subtle p-1 rounded border border-border/60">
+                                {vec.slice(0, 8).map((val, dIdx) => {
+                                  const normalized = Math.min(Math.max((val + 2) / 4, 0.1), 1.0);
+                                  return (
+                                    <span
+                                      key={dIdx}
+                                      title={`d[${dIdx}] = ${val.toFixed(3)}`}
+                                      className="w-1.5 rounded-sm transition-all"
+                                      style={{
+                                        height: `${Math.round(normalized * 12) + 3}px`,
+                                        backgroundColor: val >= 0 ? '#3B82F6' : '#94A3B8',
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right text-graphite-muted font-mono">
+                              {item.squared_l2.toFixed(5)}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-center">
+                              {item.is_exact_match ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                                  <CheckCircle className="w-3 h-3" /> Oracle Hit
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-accent font-semibold text-[11px]">
+                                  ANN Approx
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expanded Coordinate Telemetry Drawer */}
+                          {isInspected && (
+                            <tr className="bg-surface-secondary/40 border-b border-border">
+                              <td colSpan={5} className="p-4 space-y-3 font-mono text-xs">
+                                <div className="flex items-center justify-between border-b border-border pb-2 text-[11px]">
+                                  <span className="font-bold text-graphite flex items-center gap-1.5">
+                                    <Activity className="w-3.5 h-3.5 text-accent" />
+                                    Vector Telemetry Inspection (Entity #{item.id})
+                                  </span>
+                                  <span className="text-graphite-muted">
+                                    Cluster: {sample ? `Cluster ${sample.cluster}` : 'Live Index'}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                                  <div className="p-2.5 rounded bg-surface-card border border-border space-y-1">
+                                    <span className="text-graphite-subtle text-[10px] block">Candidate Vector Coordinates x ∈ ℝᵈ:</span>
+                                    <span className="text-graphite font-mono block break-all leading-relaxed">
+                                      [{vec.map((v) => v.toFixed(3)).join(', ')}]
+                                    </span>
+                                  </div>
+
+                                  <div className="p-2.5 rounded bg-surface-card border border-border space-y-1">
+                                    <span className="text-graphite-subtle text-[10px] block">Coordinate Absolute Error |q - x|:</span>
+                                    <span className="text-accent font-mono block break-all leading-relaxed">
+                                      [{vec.map((v, i) => Math.abs((currentQueryVec[i] || 0) - v).toFixed(3)).join(', ')}]
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                      </tr>
-                    ))}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
