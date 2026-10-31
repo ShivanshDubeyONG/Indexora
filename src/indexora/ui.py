@@ -101,56 +101,46 @@ def _apply_custom_styling() -> None:
             -webkit-backdrop-filter: blur(12px) !important;
         }
 
-        /* Sidebar toggle buttons: clean custom SVG/CSS chevron icon — never blank, no ligature leaks */
+        /* Sidebar collapse / expand buttons */
         [data-testid="stSidebarCollapseButton"],
         [data-testid="stExpandSidebarButton"] {
+            z-index: 100 !important;
+        }
+        [data-testid="stSidebarCollapseButton"] button,
+        [data-testid="stExpandSidebarButton"] button {
             display: inline-flex !important;
             align-items: center !important;
             justify-content: center !important;
-            width: 2rem !important;
-            height: 2rem !important;
+            width: 2.25rem !important;
+            height: 2.25rem !important;
             border-radius: 8px !important;
-            background: rgba(255, 255, 255, 0.04) !important;
-            border: 1px solid rgba(255, 255, 255, 0.09) !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            color: #cbd5e1 !important;
             cursor: pointer !important;
             transition: all 0.15s ease !important;
+            pointer-events: auto !important;
         }
-        [data-testid="stSidebarCollapseButton"]:hover,
-        [data-testid="stExpandSidebarButton"]:hover {
-            color: #f8fafc !important;
-            background: rgba(255, 255, 255, 0.09) !important;
-            border-color: rgba(255, 255, 255, 0.18) !important;
-        }
-        [data-testid="stSidebarCollapseButton"]::before {
-            content: "‹";
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #94a3b8;
-            line-height: 1;
-            margin-top: -2px;
-        }
-        [data-testid="stExpandSidebarButton"]::before {
-            content: "›";
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #94a3b8;
-            line-height: 1;
-            margin-top: -2px;
-        }
-        [data-testid="stSidebarCollapseButton"]:hover::before,
-        [data-testid="stExpandSidebarButton"]:hover::before {
-            color: #f8fafc;
-        }
-        /* Completely suppress all child text/spans inside collapse buttons */
-        [data-testid="stSidebarCollapseButton"] > *,
-        [data-testid="stExpandSidebarButton"] > * {
-            display: none !important;
+        [data-testid="stSidebarCollapseButton"] button:hover,
+        [data-testid="stExpandSidebarButton"] button:hover {
+            color: #ffffff !important;
+            background: rgba(255, 255, 255, 0.14) !important;
+            border-color: rgba(99, 102, 241, 0.5) !important;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.3) !important;
         }
 
         /* 2. Typography Hierarchy */
-        html, body, p, span, div, label, li, .stMarkdown {
+        html, body, .stMarkdown p, .stMarkdown li, .stMarkdown div, label {
             font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif !important;
             color: #94a3b8;
+        }
+        /* Preserve Streamlit icon font so ligatures (arrow_downward, expand_more) render as icons */
+        [data-testid="stIconMaterial"],
+        .material-symbols-rounded,
+        .material-icons,
+        [data-testid="stExpanderToggleIcon"],
+        [data-testid="stExpanderToggleIcon"] * {
+            font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
         }
         h1, h2, h3, h4, h5, h6, .idx-title, .idx-card-title {
             font-family: 'Montserrat', sans-serif !important;
@@ -280,20 +270,15 @@ def _apply_custom_styling() -> None:
             box-shadow: 0 0 8px #f59e0b;
         }
 
-        /* 5. Navigation Tabs */
+        /* 5. Navigation Tabs - Spacious Modern Pill Style */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 0.35rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            padding: 0 0 4px 0;
-            background: transparent;
-            margin-bottom: 1.5rem;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 0.5rem;
+            gap: 0.6rem !important;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-            padding: 0 0 6px 0 !important;
+            padding: 0 0 10px 0 !important;
             background: transparent !important;
             margin-bottom: 2rem !important;
+            overflow-x: auto !important;
+            flex-wrap: nowrap !important;
         }
         .stTabs [data-baseweb="tab-highlight"] {
             display: none !important;
@@ -302,31 +287,34 @@ def _apply_custom_styling() -> None:
             font-family: 'Poppins', sans-serif !important;
             font-size: 0.88rem !important;
             font-weight: 500 !important;
-            padding: 0.55rem 1.15rem !important;
+            padding: 0.6rem 1.35rem !important;
             border-radius: 8px !important;
             color: #94a3b8 !important;
-            background: transparent !important;
-            border: 1px solid transparent !important;
+            background: rgba(255, 255, 255, 0.03) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
             transition: all 0.15s ease-in-out !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
         }
         .stTabs [data-baseweb="tab"]:hover {
             color: #f8fafc !important;
-            background-color: rgba(255, 255, 255, 0.04) !important;
+            background-color: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
         }
         .stTabs [aria-selected="true"] {
-            background: rgba(99, 102, 241, 0.16) !important;
-            color: #f8fafc !important;
+            background: rgba(99, 102, 241, 0.18) !important;
+            color: #ffffff !important;
             font-weight: 600 !important;
-            border: 1px solid rgba(99, 102, 241, 0.38) !important;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+            border: 1px solid rgba(99, 102, 241, 0.45) !important;
+            box-shadow: 0 2px 14px rgba(99, 102, 241, 0.22) !important;
         }
 
         /* 6. Dense Technical Metric Cards */
         [data-testid="stMetric"] {
             background: #0e1424 !important;
             border: 1px solid rgba(255, 255, 255, 0.08) !important;
-            border-radius: 8px !important;
-            padding: 0.85rem 1.15rem !important;
+            border-radius: 10px !important;
+            padding: 1rem 1.25rem !important;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
         }
         [data-testid="stMetricLabel"] {
@@ -349,15 +337,15 @@ def _apply_custom_styling() -> None:
         .idx-card {
             background: #0e1424;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            padding: 1.25rem 1.35rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            border-radius: 12px;
+            padding: 1.35rem 1.5rem;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
             transition: all 0.2s ease;
         }
         .idx-card:hover {
-            border-color: rgba(99, 102, 241, 0.3);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            border-color: rgba(99, 102, 241, 0.35);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
         }
         .idx-card-header {
             display: flex;
@@ -714,11 +702,11 @@ def main() -> None:
     # -------------------------------------------------------------------------
     tab_overview, tab_playground, tab_benchmark, tab_mutations, tab_semantic = st.tabs(
         [
-            "Overview & Concepts",
-            "Search Playground",
-            "Accuracy & Benchmarks",
-            "Mutations & Persistence",
-            "Semantic Text Search",
+            "Overview",
+            "Search Lab",
+            "Benchmarks",
+            "Mutations",
+            "Semantic Search",
         ]
     )
 
@@ -768,8 +756,8 @@ def main() -> None:
                     <div class="idx-step-tech" style="color: #6ee7b7;">SearchResult(ids, dists)</div>
                 </div>
             </div>
-            <div class="idx-callout" style="margin-top: 1rem; margin-bottom: 1.5rem;">
-                <strong>Top-k Selection Architecture:</strong> Indexora avoids an expensive full \(O(N \log N)\) array sort by executing <code>np.argpartition</code> to perform \(O(N)\) average partial selection for the top-\(k\) candidates, followed by <code>np.lexsort</code> on <code>(distance, external_id)</code> pairs to guarantee strictly deterministic tie-breaking.
+            <div class="idx-callout" style="margin-top: 1.25rem; margin-bottom: 1.5rem;">
+                <strong>Top-k Selection Architecture:</strong> Indexora avoids an expensive full <code>O(N log N)</code> array sort by executing <code>np.argpartition</code> to perform <code>O(N)</code> average partial selection for the top-<code>k</code> candidates, followed by <code>np.lexsort</code> on <code>(distance, external_id)</code> pairs to guarantee strictly deterministic tie-breaking.
             </div>
             """,
             unsafe_allow_html=True,
@@ -789,7 +777,7 @@ def main() -> None:
                     </div>
                     <div class="idx-card-meta">
                         <span>Complexity: <code>O(N · d)</code></span>
-                        <span>Kernel: <code>GEMM ||q-x||²</code></span>
+                        <span>Kernel: <code>GEMM d²(q, x)</code></span>
                     </div>
                 </div>
                 """,
@@ -1022,7 +1010,7 @@ def main() -> None:
                 table_rows.append({
                     "Rank": rank_i,
                     "External ID": int(id_val),
-                    "Squared L2 (||q-x||²)": f"{dist_val:.5f}",
+                    "Squared Distance (d²)": f"{dist_val:.5f}",
                     "Ground Truth Status": "Exact Match" if is_exact_match else "Approximation",
                 })
             st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
@@ -1855,7 +1843,7 @@ def main() -> None:
         st.markdown(
             """
             <div class="idx-callout" style="margin-top: 1.5rem;">
-                <strong>Mathematical Equivalence:</strong> Because text embeddings are unit-normalized (||q|| = ||x|| = 1), minimizing squared Euclidean distance ||q-x||² = 2 - 2·cos(q, x) strictly maximizes cosine similarity. Indexora's native squared-L2 kernels power cosine ranking with zero algorithm alterations.
+                <strong>Mathematical Equivalence:</strong> Because text embeddings are unit-normalized (||q|| = ||x|| = 1), minimizing squared Euclidean distance <code>||q - x||² = 2 - 2·cos(q, x)</code> strictly maximizes cosine similarity. Indexora's native squared-L2 kernels power cosine ranking with zero algorithm alterations.
             </div>
             """,
             unsafe_allow_html=True,
