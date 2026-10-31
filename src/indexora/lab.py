@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
+import re
 from typing import Any, Callable, Sequence
 
 import numpy as np
@@ -486,19 +487,143 @@ def evaluate_index_search(
     )
 
 
+DEFAULT_LAB_STORAGE_ROOT = Path("storage/lab_indexes")
+SAFE_INDEX_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def sanitize_index_name(name: str) -> str:
+    """Validate and sanitize an index name for public/sandboxed persistence.
+
+    Parameters
+    ----------
+    name : str
+        Identifier for the index.
+
+    Returns
+    -------
+    str
+        Validated index name.
+
+    Raises
+    ------
+    ValueError
+        If name is empty, contains path traversal characters, exceeds 64 characters,
+        or contains characters outside alphanumeric, underscore, and hyphen.
+    """
+    if not isinstance(name, str):
+        raise TypeError(f"Index name must be a string, got {type(name).__name__}")
+    clean = name.strip()
+    if not clean:
+        raise ValueError("Index name cannot be empty or purely whitespace.")
+    if len(clean) > 64:
+        raise ValueError(f"Index name exceeds maximum length of 64 characters (got {len(clean)}).")
+    if ".." in clean or "/" in clean or "\\" in clean or ":" in clean or "\x00" in clean:
+        raise ValueError(f"Path traversal characters detected in index name: '{name}'")
+    if not SAFE_INDEX_NAME_PATTERN.match(clean):
+        raise ValueError(
+            f"Invalid index name: '{name}'. Only alphanumeric characters, hyphens, "
+            "and underscores are permitted (1-64 chars)."
+        )
+    return clean
+
+
+def resolve_safe_storage_path(
+    index_name: str,
+    storage_root: str | Path = DEFAULT_LAB_STORAGE_ROOT,
+) -> Path:
+    """Resolve an index directory path within a restricted storage root.
+
+    Enforces:
+    1. Strict index name validation (no path traversal, alphanumeric/hyphen/underscore).
+    2. Strict root containment: resolved path must be relative to resolved storage_root.
+    3. Target directory cannot be the storage_root itself.
+    4. Target directory cannot be an external symlink.
+
+    Parameters
+    ----------
+    index_name : str
+        Index identifier.
+    storage_root : str | Path, default='storage/lab_indexes'
+        Restricted base directory.
+
+    Returns
+    -------
+    Path
+        Resolved safe directory Path within storage_root.
+
+    Raises
+    ------
+    ValueError
+        If name is invalid, attempts traversal, or escapes storage_root.
+    """
+    clean_name = sanitize_index_name(index_name)
+    root = Path(storage_root).resolve()
+    target = (root / clean_name).resolve()
+
+    if not target.is_relative_to(root):
+        raise ValueError(f"Path traversal detected: '{index_name}' escapes storage root '{root}'")
+    if target == root:
+        raise ValueError("Index path cannot be the root storage directory itself.")
+    if target.is_symlink():
+        real_target = target.resolve()
+        if not real_target.is_relative_to(root):
+            raise ValueError(f"Symlink escape detected: '{index_name}' points outside storage root.")
+
+    return target
+
+
 class LabSession:
     """Stateful management session for mutations, filtering, and persistence in the Lab.
 
     Tracks active index modifications, keeping a strict boundary between initial
-    source dataset and mutated runtime state.
+    source dataset and mutated runtime state. Enforces sandboxed persistence within
+    a dedicated storage root for public deployments.
     """
 
-    def __init__(self, index: Any, index_name: str, d: int) -> None:
+    def __init__(
+        self,
+        index: Any,
+        index_name: str,
+        d: int,
+        storage_root: str | Path = DEFAULT_LAB_STORAGE_ROOT,
+        strict_sandbox: bool = False,
+    ) -> None:
         self.active_index = index
         self.index_name = index_name
         self.d = d
+        self.storage_root = Path(storage_root).resolve()
+        self.storage_root.mkdir(parents=True, exist_ok=True)
+        self.strict_sandbox = strict_sandbox
         self.added_ids: list[int] = []
         self.deleted_ids: list[int] = []
+
+    def save_named(self, name: str, overwrite: bool = True) -> dict[str, Any]:
+        """Safely persist active index inside storage_root using a validated index name."""
+        safe_path = resolve_safe_storage_path(name, self.storage_root)
+        return save_index(self.active_index, safe_path, overwrite=overwrite)
+
+    def load_named(self, name: str, verify_checksums: bool = True) -> Any:
+        """Safely load an index from storage_root using a validated index name."""
+        safe_path = resolve_safe_storage_path(name, self.storage_root)
+        loaded = load_index(safe_path, verify_checksums=verify_checksums)
+        self.active_index = loaded
+        self.index_name = type(loaded).__name__
+        self.d = loaded.d
+        return loaded
+
+    def list_saved(self) -> list[str]:
+        """List valid saved index names present in storage_root."""
+        if not self.storage_root.exists():
+            return []
+        names: list[str] = []
+        for item in self.storage_root.iterdir():
+            if item.is_dir() and (item / "manifest.json").exists():
+                try:
+                    clean = sanitize_index_name(item.name)
+                    names.append(clean)
+                except ValueError:
+                    continue
+        return sorted(names)
 
     @property
     def active_count(self) -> int:
@@ -587,7 +712,7 @@ class LabSession:
         Parameters
         ----------
         target_dir : str | Path
-            Directory path where index manifest and arrays will be written.
+            Directory path or sanitized index identifier.
         overwrite : bool, default=True
             Whether to overwrite existing directory contents.
 
@@ -596,7 +721,15 @@ class LabSession:
         dict[str, Any]
             The saved manifest dictionary.
         """
-        p = Path(target_dir)
+        if self.strict_sandbox:
+            p = resolve_safe_storage_path(str(target_dir), self.storage_root)
+        else:
+            p = Path(target_dir)
+            if not p.is_absolute() and len(p.parts) == 1 and not (".." in str(target_dir)):
+                try:
+                    p = resolve_safe_storage_path(str(target_dir), self.storage_root)
+                except ValueError:
+                    p = Path(target_dir)
         return save_index(self.active_index, p, overwrite=overwrite)
 
     def load(self, source_dir: str | Path, verify_checksums: bool = True) -> Any:
@@ -605,7 +738,7 @@ class LabSession:
         Parameters
         ----------
         source_dir : str | Path
-            Directory path containing manifest.json and array files.
+            Directory path or sanitized index identifier.
         verify_checksums : bool, default=True
             Whether to verify SHA-256 checksums of all array files.
 
@@ -614,7 +747,17 @@ class LabSession:
         Any
             The restored index instance.
         """
-        p = Path(source_dir)
+        if self.strict_sandbox:
+            p = resolve_safe_storage_path(str(source_dir), self.storage_root)
+        else:
+            p = Path(source_dir)
+            if not p.is_absolute() and len(p.parts) == 1 and not (".." in str(source_dir)):
+                try:
+                    candidate = resolve_safe_storage_path(str(source_dir), self.storage_root)
+                    if candidate.exists():
+                        p = candidate
+                except ValueError:
+                    p = Path(source_dir)
         loaded = load_index(p, verify_checksums=verify_checksums)
         self.active_index = loaded
         self.index_name = type(loaded).__name__

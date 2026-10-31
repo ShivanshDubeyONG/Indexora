@@ -42,9 +42,9 @@ from indexora.semantic import (
     SemanticSearchEngine,
     SemanticSearchResult,
     build_semantic_engine,
+    check_semantic_availability,
     is_sentence_transformers_available,
     load_demo_corpus,
-    mock_embed_texts,
 )
 
 
@@ -1288,35 +1288,51 @@ def main() -> None:
                     st.error(f"Deletion failed: {exc}")
 
         st.markdown("---")
-        st.markdown("#### Atomic Persistence Engine (`save_index` / `load_index`)")
+        st.markdown("#### Sandboxed Atomic Persistence Engine (`save_index` / `load_index`)")
         st.markdown(
             "Serializes numerical array weights to pickle-free `.npy` files and generates a versioned "
-            "`manifest.json` with streaming SHA-256 file digests."
+            "`manifest.json` with streaming SHA-256 file digests. Operations are strictly sandboxed within "
+            "`storage/lab_indexes/` to prevent arbitrary filesystem access or path traversal."
         )
 
         p_col1, p_col2 = st.columns(2)
-        demo_save_dir = Path("demo_indexes/lab_session")
 
         with p_col1:
             st.markdown("**Save Active Index State**")
-            save_path_str = st.text_input("Target Directory:", value=str(demo_save_dir))
-            if st.button("💾 Write to Storage", use_container_width=True):
+            save_name_str = st.text_input(
+                "Index Identifier:",
+                value="my_lab_session",
+                help="Alphanumeric name (1-64 characters). Stored in dedicated storage/lab_indexes/.",
+            )
+            if st.button("💾 Write to Sandboxed Storage", use_container_width=True):
                 try:
-                    target_p = Path(save_path_str)
-                    manifest_data = session.save(target_p, overwrite=True)
-                    st.success(f"Storage committed to `{target_p}`")
+                    manifest_data = session.save_named(save_name_str, overwrite=True)
+                    st.success(f"Storage committed to sandbox: `{save_name_str}`")
                     st.json(manifest_data)
                 except Exception as exc:
                     st.error(f"Save failed: {exc}")
 
         with p_col2:
             st.markdown("**Restore & Validate Checksums**")
-            load_path_str = st.text_input("Source Directory:", value=str(demo_save_dir), key="load_dir")
+            available_saved = session.list_saved()
+            if available_saved:
+                load_choice_str = st.selectbox(
+                    "Select Saved Index:",
+                    options=available_saved,
+                    help="Detected valid saved indexes in storage/lab_indexes/.",
+                )
+            else:
+                load_choice_str = st.text_input(
+                    "Index Identifier to Load:",
+                    value="my_lab_session",
+                    key="load_ident_txt",
+                    help="Name of saved index in storage/lab_indexes/.",
+                )
+
             if st.button("📂 Load & Verify Storage", use_container_width=True):
                 try:
-                    source_p = Path(load_path_str)
-                    restored_idx = session.load(source_p, verify_checksums=True)
-                    st.success(f"Successfully verified and loaded `{type(restored_idx).__name__}`!")
+                    restored_idx = session.load_named(load_choice_str, verify_checksums=True)
+                    st.success(f"Successfully verified and loaded `{type(restored_idx).__name__}` (`{load_choice_str}`)!")
 
                     # Verification query
                     q_test = np.zeros(session.d, dtype=np.float32)
@@ -1335,148 +1351,177 @@ def main() -> None:
             "and Indexora's native vector engines (**Exact BLAS**, **IVF-Flat**, and **HNSW**)."
         )
 
+        corpus_docs = load_demo_corpus()
         has_st = is_sentence_transformers_available()
-        
-        if has_st:
-            mode_choice = st.radio(
-                "Embedding Pipeline:",
-                options=["Neural Pretrained (MiniLM-L6-v2, 384-D)", "Offline Mock (Deterministic Hash, 64-D)"],
-                horizontal=True,
-                help="Neural mode downloads real sentence-transformers weights; Offline mock runs zero-dependency hash projections.",
-            )
-            use_mock = "Mock" in mode_choice
-        else:
-            use_mock = True
+
+        if not has_st:
             st.markdown(
                 """
-                <div class="idx-callout" style="margin-bottom: 1rem;">
-                    <strong>Offline Mock Mode Active:</strong> Neural sentence-transformers dependencies not detected. 
-                    Running with deterministic 64-D mock projections. To enable real pretrained embeddings: <code>pip install -e ".[semantic]"</code>
+                <div class="idx-callout" style="margin-bottom: 1.5rem;">
+                    <h4 style="margin-top:0; color:#e2e8f0; font-size: 1.05rem;">⚠️ Semantic Text Search Unavailable in this Environment</h4>
+                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                        Real semantic retrieval requires neural sentence embeddings (<code>sentence-transformers</code> and <code>PyTorch</code>).
+                        These optional deep-learning packages are not installed in the current environment.
+                    </p>
+                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                        <strong>Why pseudo-random mock search is disabled:</strong><br/>
+                        Indexora strictly avoids substituting pseudo-random or hash-derived vectors for semantic retrieval.
+                        Random vectors lack semantic structure, and ranking them generates misleading similarity scores
+                        and false ground-truth claims.
+                    </p>
+                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                        <strong>To enable real semantic search locally:</strong><br/>
+                        <code>pip install -e ".[semantic]"</code><br/>
+                        <code>streamlit run src/indexora/ui.py</code>
+                    </p>
+                    <p style="margin-bottom:0; color:#94a3b8; font-size:0.9rem;">
+                        <strong>Core Engine Status:</strong><br/>
+                        Tabs 1–4 (Overview & Concepts, Search Playground, Accuracy & Benchmarks, Mutations & Sandboxed Persistence)
+                        remain 100% operational using pure Python and NumPy with zero deep-learning dependencies.
+                    </p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-        corpus_docs = load_demo_corpus()
+            with st.expander("📄 Preview Technical Document Corpus (25 Documents Across 5 Domains)", expanded=True):
+                for d in corpus_docs:
+                    st.markdown(f"**[{d.category}] {d.title}** (ID: `{d.doc_id}`)\n\n_{d.text}_")
+        else:
+            # Model initialization and embedding generation with strict failure isolation
+            model = None
+            try:
+                from indexora.semantic import get_embedding_model, encode_texts
+                model = get_embedding_model(DEFAULT_EMBEDDING_MODEL)
+            except Exception as exc:
+                st.error(
+                    f"**Neural embedding model initialization failed:** {exc}\n\n"
+                    "Semantic search requires valid pretrained weights. Indexora will not silently substitute "
+                    "random vectors. Please verify network access for the initial download or check local PyTorch setup."
+                )
+                st.stop()
 
-        # Engine caching in session state
-        embed_cache_key = "semantic_doc_embeddings_mock" if use_mock else "semantic_doc_embeddings_real"
-        if embed_cache_key not in st.session_state:
-            with st.spinner("Generating document corpus embeddings..."):
-                texts = [d.text for d in corpus_docs]
-                if use_mock:
-                    st.session_state[embed_cache_key] = mock_embed_texts(texts, dim=64)
-                else:
-                    try:
-                        from indexora.semantic import encode_texts
-                        st.session_state[embed_cache_key] = encode_texts(texts, normalize=True)
-                    except Exception as exc:
-                        st.warning(f"Neural model initialization failed ({exc}). Gracefully falling back to deterministic offline mock embeddings.")
-                        st.session_state["semantic_doc_embeddings_mock"] = mock_embed_texts(texts, dim=64)
-                        embed_cache_key = "semantic_doc_embeddings_mock"
-                        use_mock = True
+            # Cache document corpus embeddings in session state
+            if "semantic_doc_embeddings_real" not in st.session_state:
+                with st.spinner("Generating dense sentence embeddings with all-MiniLM-L6-v2..."):
+                    texts = [d.text for d in corpus_docs]
+                    st.session_state["semantic_doc_embeddings_real"] = encode_texts(texts, model=model, normalize=True)
 
-        cached_embeddings = st.session_state[embed_cache_key]
+            cached_embeddings = st.session_state["semantic_doc_embeddings_real"]
 
-        # UI Controls
-        c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 1, 1])
-        with c_ctrl1:
-            sem_index_choice = st.selectbox(
-                "Retrieval Engine Architecture:",
-                options=["Exact BLAS", "Exact Flat (Ref)", "IVF-Flat", "HNSW"],
-                index=0,
-                key="sem_idx_choice",
-            )
-        with c_ctrl2:
-            all_categories = ["All Categories"] + sorted({d.category for d in corpus_docs})
-            selected_cat = st.selectbox("Category Filter:", options=all_categories, index=0)
-        with c_ctrl3:
-            sem_k = st.slider("Top-k Results:", min_value=1, max_value=10, value=5, step=1)
+            # UI Controls
+            c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 1, 1])
+            with c_ctrl1:
+                sem_index_choice = st.selectbox(
+                    "Retrieval Engine Architecture:",
+                    options=["Exact BLAS", "Exact Flat (Ref)", "IVF-Flat", "HNSW"],
+                    index=0,
+                    key="sem_idx_choice",
+                )
+            with c_ctrl2:
+                all_categories = ["All Categories"] + sorted({d.category for d in corpus_docs})
+                selected_cat = st.selectbox("Category Filter:", options=all_categories, index=0)
+            with c_ctrl3:
+                sem_k = st.slider("Top-k Results:", min_value=1, max_value=10, value=5, step=1)
 
-        # Index Tuning Parameters
-        sem_nprobe = 2
-        sem_ef = 32
-        if sem_index_choice == "IVF-Flat":
-            sem_nprobe = st.slider("IVF Probed Centroids (`nprobe`):", min_value=1, max_value=4, value=2, step=1)
-        elif sem_index_choice == "HNSW":
-            sem_ef = st.slider("HNSW Exploration Depth (`ef_search`):", min_value=8, max_value=64, value=32, step=8)
+            # Index Tuning Parameters
+            sem_nprobe = 2
+            sem_ef = 32
+            if sem_index_choice == "IVF-Flat":
+                sem_nprobe = st.slider("IVF Probed Centroids (`nprobe`):", min_value=1, max_value=4, value=2, step=1)
+            elif sem_index_choice == "HNSW":
+                sem_ef = st.slider("HNSW Exploration Depth (`ef_search`):", min_value=8, max_value=64, value=32, step=8)
 
-        # Build / retrieve engine
-        embedder_fn = (lambda t: mock_embed_texts(t, dim=64)) if use_mock else None
-        engine = SemanticSearchEngine(
-            corpus=corpus_docs,
-            embeddings=cached_embeddings,
-            index_type=sem_index_choice,
-            embedder=embedder_fn,
-            model_name=DEFAULT_EMBEDDING_MODEL,
-            ivf_nlist=4,
-            ivf_nprobe=sem_nprobe,
-            hnsw_m=8,
-            hnsw_ef_construction=32,
-            hnsw_ef_search=sem_ef,
-        )
-
-        st.markdown("---")
-        st.markdown("#### Search Input")
-
-        example_queries = [
-            "How do attention mechanisms in language models work?",
-            "LSM-tree write performance and disk flushing",
-            "Consensus algorithms and fault-tolerant leader election",
-            "Zero trust architecture and network encryption",
-            "Decoupling services with asynchronous message queues",
-        ]
-
-        preset_cols = st.columns(len(example_queries))
-        preset_clicked: str | None = None
-        for i, q_text in enumerate(example_queries):
-            short_label = q_text.split()[0] + " " + q_text.split()[1] + "..."
-            if preset_cols[i].button(short_label, key=f"ex_q_{i}", help=q_text, use_container_width=True):
-                preset_clicked = q_text
-
-        default_query_text = preset_clicked or "How do attention mechanisms in language models work?"
-        user_query = st.text_input("Enter natural language query:", value=default_query_text)
-
-        filter_category_val = None if selected_cat == "All Categories" else selected_cat
-
-        if user_query.strip():
-            result: SemanticSearchResult = engine.search(
-                query=user_query,
-                k=sem_k,
-                filter_category=filter_category_val,
-                nprobe=sem_nprobe,
-                ef_search=sem_ef,
+            engine = SemanticSearchEngine(
+                corpus=corpus_docs,
+                embeddings=cached_embeddings,
+                index_type=sem_index_choice,
+                embedder=model,
+                model_name=DEFAULT_EMBEDDING_MODEL,
+                ivf_nlist=4,
+                ivf_nprobe=sem_nprobe,
+                hnsw_m=8,
+                hnsw_ef_construction=32,
+                hnsw_ef_search=sem_ef,
             )
 
-            # Metrics row with clear latency segregation
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Total Latency", f"{result.latency_ms + result.embed_time_ms:.2f} ms")
-            with m2:
-                st.metric("Text Embed Time", f"{result.embed_time_ms:.2f} ms")
-            with m3:
-                st.metric("Index Search Time", f"{result.latency_ms:.3f} ms")
-            with m4:
-                dist_str = str(result.distance_computations) if result.distance_computations is not None else "N/A"
-                st.metric("Distance Computations", dist_str)
-            with m5:
-                match_pct = (sum(result.is_exact_match) / len(result.is_exact_match) * 100) if result.is_exact_match else 0.0
-                st.metric("Exact Top-k Match", f"{match_pct:.0f}%")
+            st.markdown("---")
+            st.markdown("#### Search Input")
 
-            st.markdown("#### Ranked Documents")
-            if not result.retrieved_documents:
-                st.info("No documents found matching the query and category filter.")
-            else:
-                cos_sims = result.cosine_similarities
-                for rank, (doc, dist, is_match, cos_sim) in enumerate(
-                    zip(result.retrieved_documents, result.distances, result.is_exact_match, cos_sims),
-                    start=1,
-                ):
-                    match_badge = (
-                        '<span class="badge-emerald">Exact Match</span>'
-                        if is_match
-                        else '<span class="badge-indigo">Approximation</span>'
+            example_queries = [
+                "How do attention mechanisms in language models work?",
+                "LSM-tree write performance and disk flushing",
+                "Consensus algorithms and fault-tolerant leader election",
+                "Zero trust architecture and network encryption",
+                "Decoupling services with asynchronous message queues",
+            ]
+
+            preset_cols = st.columns(len(example_queries))
+            preset_clicked: str | None = None
+            for i, q_text in enumerate(example_queries):
+                short_label = q_text.split()[0] + " " + q_text.split()[1] + "..."
+                if preset_cols[i].button(short_label, key=f"ex_q_{i}", help=q_text, use_container_width=True):
+                    preset_clicked = q_text
+
+            default_query_text = preset_clicked or "How do attention mechanisms in language models work?"
+            user_query = st.text_input("Enter natural language query:", value=default_query_text)
+
+            filter_category_val = None if selected_cat == "All Categories" else selected_cat
+
+            if user_query.strip():
+                result: SemanticSearchResult = engine.search(
+                    query=user_query,
+                    k=sem_k,
+                    filter_category=filter_category_val,
+                    nprobe=sem_nprobe,
+                    ef_search=sem_ef,
+                )
+
+                # Metrics row with clear latency segregation
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Total Latency", f"{result.latency_ms + result.embed_time_ms:.2f} ms")
+                with m2:
+                    st.metric("Text Embed Time (PyTorch)", f"{result.embed_time_ms:.2f} ms")
+                with m3:
+                    st.metric("Vector Search Time (Indexora)", f"{result.latency_ms:.3f} ms")
+                with m4:
+                    dist_str = str(result.distance_computations) if result.distance_computations is not None else "N/A"
+                    st.metric("Distance Computations", dist_str)
+                with m5:
+                    match_pct = (sum(result.is_exact_match) / len(result.is_exact_match) * 100) if result.is_exact_match else 0.0
+                    st.metric(
+                        "Vector Oracle Agreement",
+                        f"{match_pct:.0f}%",
+                        help="Percentage of retrieved documents matching the exact brute-force BLAS vector search oracle. Measures vector index recall; does not evaluate human relevance.",
                     )
+
+                st.markdown(
+                    """
+                    <div class="idx-callout" style="margin-bottom: 1rem; font-size: 0.85rem;">
+                        <strong>Pipeline Clarity:</strong>
+                        <strong>Text Embed Time</strong> is deep-learning inference.
+                        <strong>Vector Search Time</strong> is Indexora nearest-neighbor search.
+                        <strong>Vector Oracle Agreement</strong> indicates index fidelity against exhaustive vector scan; it does not independently establish semantic or human relevance.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("#### Ranked Documents")
+                if not result.retrieved_documents:
+                    st.info("No documents found matching the query and category filter.")
+                else:
+                    cos_sims = result.cosine_similarities
+                    for rank, (doc, dist, is_match, cos_sim) in enumerate(
+                        zip(result.retrieved_documents, result.distances, result.is_exact_match, cos_sims),
+                        start=1,
+                    ):
+                        match_badge = (
+                            '<span class="badge-emerald">Oracle Hit</span>'
+                            if is_match
+                            else '<span class="badge-indigo">ANN Candidate</span>'
+                        )
                     tags_html = " ".join([f'<code>{t}</code>' for t in doc.metadata.get("tags", [])])
 
                     st.markdown(

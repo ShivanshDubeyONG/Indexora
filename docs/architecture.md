@@ -179,6 +179,8 @@ Indexora implements a custom, pickle-free binary storage format designed for cro
    - IVF-PQ indexes restore coarse centroids and subspace codebooks without retraining.
 5. **Path Traversal Hardening:**
    - During `load_index`, all declared array filenames in `manifest.json` are resolved and verified to be strictly contained within the index directory via `filepath.is_relative_to(index_dir)`, preventing path traversal vulnerability attacks.
+6. **Sandboxed Public Persistence:**
+   - In public interactive deployments (e.g. Streamlit UI and `LabSession`), persistence operations are strictly confined within a designated application storage root (`storage/lab_indexes/`). User-supplied identifiers are sanitized (`^[a-zA-Z0-9_-]{1,64}$`), and directory traversals (`..`), absolute paths, and external symlinks are deterministically rejected with `ValueError`.
 
 ---
 
@@ -215,6 +217,9 @@ sequenceDiagram
 1. **Text Embedding:** The query string is encoded by `sentence-transformers/all-MiniLM-L6-v2` into a 384-dimensional vector and $L_2$-normalized.
 2. **Latency Segregation:** Embedding time ($t_{\text{embed}}$, typically 20–50 ms on CPU) is measured and reported strictly separately from vector search time ($t_{\text{search}}$, typically 0.1–2 ms).
 3. **Document Mapping:** Top-$k$ integer IDs are mapped to immutable `Document` dataclasses containing title, text snippet, category, and metadata tags.
+4. **Strict Availability & Relevance Boundaries:**
+   - **No Mock Fallback:** Semantic search strictly requires actual neural sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). When optional dependencies or weights are unavailable, the engine enters an explicit unavailable state rather than substituting pseudo-random vectors.
+   - **Vector Oracle Agreement vs. Semantic Relevance:** Exact vector oracle hits establish mathematical fidelity against brute-force vector scans in representation space; they do not independently evaluate subjective human or semantic relevance.
 
 ---
 

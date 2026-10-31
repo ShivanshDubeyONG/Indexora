@@ -53,6 +53,7 @@ sift/
 
 # IDE and OS files
 demo_indexes/
+storage/
 .idea/
 .vscode/
 *.swp

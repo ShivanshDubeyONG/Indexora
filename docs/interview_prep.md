@@ -221,7 +221,7 @@ When presenting Indexora in an interview or demo, follow this 4-step walkthrough
 ```bash
 # Step 1: Verify Algorithmic Correctness (15s)
 pytest -q
-# Point out: 329 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
+# Point out: 372 passing tests covering mathematical kernels, IVF, PQ, HNSW, mutations, and persistence.
 
 # Step 2: Run Offline Smoke Benchmark (10s)
 python -m indexora.benchmark --smoke --no-plot
@@ -229,7 +229,7 @@ python -m indexora.benchmark --smoke --no-plot
 
 # Step 3: Launch Interactive Index Lab (30s)
 streamlit run src/indexora/ui.py
-# Point out: 
+# Point out:
 # - Tab 2 (Playground): 2D PCA spatial projection highlighting query vs nearest neighbors.
 # - Tab 4 (Mutations): Real-time vector additions, tombstone deletions, and SHA-256 persistence round-trips.
 

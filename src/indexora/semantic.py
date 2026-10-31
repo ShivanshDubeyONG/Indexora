@@ -92,6 +92,17 @@ class SemanticSearchResult:
         sims = 1.0 - 0.5 * self.distances
         return np.clip(sims, -1.0, 1.0)
 
+    @property
+    def vector_oracle_agreement(self) -> float:
+        """Fraction of retrieved candidates matching the exact brute-force vector search oracle.
+
+        Note: Measures vector index recall against an exhaustive scan in embedding space.
+        Does not independently evaluate human or semantic relevance.
+        """
+        if not self.is_exact_match:
+            return 0.0
+        return float(sum(self.is_exact_match) / len(self.is_exact_match))
+
 
 # -----------------------------------------------------------------------------
 # Demonstration Technical Corpus
@@ -373,8 +384,20 @@ DEFAULT_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 _LOADED_MODEL_CACHE: dict[str, Any] = {}
 
 
-class SentenceTransformersNotAvailableError(ImportError):
+class SemanticSearchUnavailableError(RuntimeError):
+    """Base exception raised when semantic search capabilities are unavailable."""
+
+    pass
+
+
+class SentenceTransformersNotAvailableError(SemanticSearchUnavailableError, ImportError):
     """Raised when sentence-transformers or its dependencies are not installed."""
+
+    pass
+
+
+class ModelInitializationError(SemanticSearchUnavailableError, RuntimeError):
+    """Raised when pretrained embedding model weights fail to load or initialize."""
 
     pass
 
@@ -388,6 +411,26 @@ def is_sentence_transformers_available() -> bool:
         return False
 
 
+def check_semantic_availability(model_name: str = DEFAULT_EMBEDDING_MODEL) -> tuple[bool, str]:
+    """Check whether semantic search can be run in the current environment.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_available, diagnostic_message)
+    """
+    if not is_sentence_transformers_available():
+        return False, (
+            "Optional dependency 'sentence-transformers' is not installed. "
+            "Install it with: pip install -e \".[semantic]\""
+        )
+    try:
+        get_embedding_model(model_name)
+        return True, "Pretrained embedding model is available."
+    except Exception as exc:
+        return False, f"Embedding model failed to initialize: {exc}"
+
+
 def get_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> Any:
     """Load and cache a pretrained SentenceTransformer model on CPU.
 
@@ -395,7 +438,7 @@ def get_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> Any:
     ------
     SentenceTransformersNotAvailableError
         If sentence-transformers is not installed.
-    RuntimeError
+    ModelInitializationError
         If the model weights cannot be downloaded or loaded.
     """
     if not is_sentence_transformers_available():
@@ -413,17 +456,18 @@ def get_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> Any:
         _LOADED_MODEL_CACHE[model_name] = model
         return model
     except Exception as exc:
-        raise RuntimeError(
+        raise ModelInitializationError(
             f"Failed to load sentence-transformers model '{model_name}': {exc}. "
             "A working internet connection is required on the initial run to download model weights."
         ) from exc
 
 
 def mock_embed_texts(texts: Sequence[str] | str, dim: int = 64) -> np.ndarray:
-    """Deterministic offline mock embedder generating unit-normalized vectors.
+    """Deterministic offline test-fixture vector generator for unit tests.
 
-    Useful for offline testing and interactive lab fallback when deep learning weights
-    or dependencies are not installed in the local environment.
+    WARNING: This helper hashes text into pseudo-random vectors. These vectors do
+    NOT capture linguistic or semantic meaning and must NEVER be substituted in
+    place of real neural embeddings for semantic search or relevance evaluation.
     """
     import hashlib
 

@@ -1,7 +1,7 @@
 # Indexora
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests Passing](https://img.shields.io/badge/tests-329%20passed-success.svg)]()
+[![Tests Passing](https://img.shields.io/badge/tests-372%20passed-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
@@ -111,7 +111,7 @@ The core educational philosophy is **learning ownership**: the core algorithm bo
 - **Phase 10 (Custom HNSW Index):** Complete. Built Hierarchical Navigable Small World (`HNSWIndex`, `hnsw_build`, `hnsw_search`) from scratch in Python and NumPy without external libraries. Features multi-layer proximity graphs with exponential level sampling ($m_L = 1 / \ln(M)$), bounded best-first greedy beam search, Malkov & Yashunin's Algorithm 4 heuristic diversity neighbor selection, exact graph invariant checks, arbitrary `int64` IDs (including negative IDs), exact memory accounting, and benchmark integration achieving **1.0000 Recall@10** on synthetic clustered data while evaluating only ~15% of database distances.
 - **Phase 11 (Mutations, Filtering & Persistence):** Complete. Implemented incremental additions (`add`), deletions (`delete`), filtered candidate search (`filter_ids`), and atomic disk persistence (`save_index`, `load_index`) across all core index implementations. Features pickle-free `.npy` storage, SHA-256 manifest integrity verification, CSR graph serialization for HNSW without re-indexing, and codebook preservation for IVF-PQ without retraining.
 - **Phase 12A (Interactive Index Lab):** Complete. Built a local-first interactive web laboratory in Streamlit backed directly by Indexora's actual vector engines. Features interactive query search with 2D PCA spatial maps, comparative accuracy-vs-latency benchmarks across all 5 core indexes, real-time incremental additions and tombstone deletions, and atomic disk persistence verification with SHA-256 checksums.
-- **Phase 12B (Semantic Text Search Integration):** Complete. Delivered end-to-end natural language semantic search backed directly by Indexora's native vector retrieval engines (Exact BLAS, IVF-Flat, and HNSW) and pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). Features a curated 25-document technical demonstration corpus across 5 engineering domains (distinguished from offline mock embedding fallbacks), strict separation of embedding time from indexing time, exact top-$k$ recall evaluation on live queries, category filtering, and mathematical equivalence between unit-vector squared L2 distance and cosine similarity. All 329 tests pass completely offline.
+- **Phase 12B (Semantic Text Search Integration):** Complete. Delivered end-to-end natural language semantic search backed directly by Indexora's native vector retrieval engines (Exact BLAS, IVF-Flat, and HNSW) and pretrained sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`). Features a curated 25-document technical demonstration corpus across 5 engineering domains (distinguished from offline mock embedding fallbacks), strict separation of embedding time from indexing time, exact top-$k$ recall evaluation on live queries, category filtering, and mathematical equivalence between unit-vector squared L2 distance and cosine similarity. All 372 tests pass completely offline.
 
 ## Project Conventions
 
@@ -479,7 +479,7 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
    ```bash
    pytest -q
    ```
-   Runs 329 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
+   Runs 372 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
 
 2. **Run the Offline Smoke Benchmark (5s):**
    ```bash
@@ -503,7 +503,7 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 - **[`docs/DEMO_WALKTHROUGH.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview demonstration guide.
 - **[`docs/FINAL_AUDIT_REPORT.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/FINAL_AUDIT_REPORT.md):** Comprehensive project audit, security hardening, and release readiness verification.
 - **[`docs/RELEASE_NOTES_v1.0.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/RELEASE_NOTES_v1.0.md):** v1.0 release notes, architecture breakdown, and verified benchmark metrics.
-- **[`docs/decisions.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/decisions.md):** Architecture Decision Records (ADRs 0001 through 0009).
+- **[`docs/decisions.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/decisions.md):** Architecture Decision Records (ADRs 0001 through 0010).
 - `plan/project srs.md`: Project Brief & Software Requirements Specification (SRS v3.0)
 - `plan/tech design.md`: Architecture, Data Model, Kernel Contracts & Experiments (v3.0)
 - `plan/implementation.md`: 14-phase acceptance-gated roadmap and ownership policy (v3.0)

@@ -38,7 +38,7 @@ What invariants must be preserved by this decision? What are the trade-offs?
 
 - **Format:** Vectors must be represented as 2D NumPy arrays of shape `(N, d)` with `dtype=np.float32`.
 - **Memory Layout:** Arrays must be contiguous in memory (C-contiguous, e.g., via `np.ascontiguousarray`). Contiguity ensures predictable memory access patterns for SIMD vectorization and cache utilization.
-- **Validation:** Dimensions, shape compatibility, and value finiteness (`np.isfinite`) must be validated upon entry. 
+- **Validation:** Dimensions, shape compatibility, and value finiteness (`np.isfinite`) must be validated upon entry.
 - **No Silent Preprocessing:** The engine must never silently normalize vectors, convert dtypes, truncate dimensions, or impute missing/NaN values. Any metric requiring unit-norm vectors (such as Cosine distance) must provide an explicit normalization utility with a documented zero-vector policy.
 
 ### 2. Identifier Representation: Stable `int64` IDs
@@ -52,7 +52,7 @@ What invariants must be preserved by this decision? What are the trade-offs?
 
 - **Definition:** The primary metric for vector comparison is squared Euclidean distance:
   $$d^2(q, x) = \sum_{j=1}^{d} (q_j - x_j)^2$$
-- **Rationale:** 
+- **Rationale:**
   1. For any set of vectors, ranking by $d^2(q, x)$ is strictly monotonically equivalent to ranking by true Euclidean distance $\|q - x\|_2$.
   2. Eliminating the square root operation ($\sqrt{\cdot}$) saves significant CPU cycles across millions of pairwise comparisons.
 - **Correctness Reference:** The direct coordinate difference $\sum (q_j - x_j)^2$ (with higher-precision accumulation where appropriate) serves as the system's correctness oracle. Fast BLAS matrix formulations ($\|q\|^2 - 2q^Tx + \|x\|^2$) are treated as optimizations that must be benchmarked against this oracle.
@@ -479,3 +479,41 @@ Indexora persistence stores index metadata in `manifest.json` and associated vec
 - Safe index deserialization: Loading an untrusted index directory cannot escape into parent directories or read outside files.
 - Preserves zero external dependencies and zero-overhead pickle-free `.npy` storage format.
 - Backward compatibility: Completely transparent to all valid `indexora` indexes created via `save_index`.
+
+
+---
+
+## ADR-0010: Sandboxed Public Persistence and Strict Semantic Retrieval Availability
+
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Decision Owner:** Post-v1.0 Security Hardening (Phase 1)
+
+### 1. Context
+An external technical review identified two high-priority correctness and security issues:
+1. **Unrestricted UI Persistence Input:** While manifest array path traversal was mitigated in ADR-0009, the public Streamlit UI previously accepted arbitrary user-input directory paths for `session.save()` and `session.load()`, allowing callers in hosted environments to request the application to inspect or write arbitrary directories across the server filesystem.
+2. **Misleading Semantic Retrieval Fallback:** When deep learning dependencies (`sentence-transformers`, `torch`) or model weights were unavailable, the application previously fell back to hash-based pseudo-random vectors (`mock_embed_texts`). Because random vectors lack linguistic semantics, presenting ranked documents, cosine similarity scores, and "Exact Match" indicators gave a deceptive appearance of meaningful semantic retrieval.
+
+### 2. Decisions
+
+1. **Sandboxed Public Persistence:**
+   - Public UI persistence is strictly restricted to an application-controlled storage directory (`storage/lab_indexes/`).
+   - User input is restricted to sanitized index identifiers (`^[a-zA-Z0-9_-]{1,64}$`).
+   - `resolve_safe_storage_path()` resolves target paths and enforces `target.is_relative_to(storage_root.resolve())`.
+   - Traversal attempts (`..`, `/`, `\`), absolute paths (`/etc`, `C:\`), special characters, and external symlink escapes are rejected with `ValueError`.
+   - Low-level Python programmatic APIs (`save_index`, `load_index`) remain flexible for local developers, while `LabSession` provides `save_named()` and `load_named()` for public sandboxing.
+
+2. **Strict Semantic Retrieval Availability:**
+   - Production semantic retrieval strictly requires real neural sentence embeddings (`all-MiniLM-L6-v2` via `sentence-transformers`).
+   - If optional dependencies or model weights are unavailable, the semantic search tab enters an explicit, transparent unavailable state.
+   - Pseudo-random mock vectors are strictly prohibited from entering the semantic retrieval pipeline.
+   - Semantic metrics cleanly decouple:
+     - Text Embedding Time (PyTorch neural inference)
+     - Vector Search Time (Indexora nearest-neighbor search)
+     - Vector Oracle Agreement (mathematical fidelity to brute-force vector search oracle)
+     - Semantic Relevance (human/linguistic correlation, which is not established solely by vector oracle agreement).
+
+### 3. Consequences & Invariants
+- Public deployments (e.g. Streamlit Community Cloud) cannot be manipulated into reading or overwriting arbitrary host directories.
+- The Interactive Index Lab (Tabs 1–4) remains 100% operational in lightweight environments without deep learning dependencies.
+- No false semantic claims or deceptive similarity scores are displayed when neural models are absent.
