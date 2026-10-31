@@ -29,11 +29,11 @@ The core educational philosophy is **learning ownership**: foundational algorith
 ### 3. Full Vector Lifecycle & Security Hardening (Phase 11)
 - **Incremental Mutations:** Dynamic `add()` for runtime ingestion and `delete()` supporting tombstone markers in HNSW to preserve graph routing reachability without immediate structural degradation.
 - **Filtered Candidate Search:** Integrated `filter_ids` parameter accepting `set[int]`, NumPy arrays, or callable predicates to filter candidates prior to distance evaluation and top-$k$ insertion.
-- **Safe Atomic Persistence:** Pickle-free `.npy` numerical array serialization coupled with `manifest.json` metadata, streaming 64 KiB SHA-256 integrity checksums, and strict directory path traversal verification (`is_relative_to(path_resolved)`).
+- **Safe Atomic Persistence:** Pickle-free `.npy` numerical array serialization coupled with `manifest.json` metadata, streaming 64 KiB SHA-256 integrity checksums, and strict directory path traversal verification (`is_relative_to(path_resolved)`). Public-facing lab sessions are sandboxed within `storage/lab_indexes/`.
 
 ### 4. Interactive Lab & Semantic Retrieval (Phases 12A, 12B)
 - **Interactive Index Lab (Streamlit):** Web playground with dark developer-tool aesthetics, 2D PCA spatial maps, real-time index mutation testing, and live recall vs. latency tradeoff sweeps across all 5 index architectures.
-- **Semantic Text Search:** End-to-end natural language queries across a 25-document technical demonstration corpus. Employs sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`) and leverages the mathematical equivalence between unit-norm squared L2 distance and cosine similarity ($\|q-x\|^2 = 2 - 2\cos(q, x)$). Fully decoupled embedding time from index retrieval time.
+- **Semantic Text Search:** End-to-end natural language queries across a 25-document technical demonstration corpus. Employs sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`) and leverages the mathematical equivalence between unit-norm squared L2 distance and cosine similarity ($\|q-x\|^2 = 2 - 2\cos(q, x)$). Fully decoupled embedding time from index retrieval time, strictly rejecting pseudo-random mock fallback in production search and reporting Vector Oracle Agreement against exact BLAS ground truth.
 
 ### 5. Benchmark Harness & Verified SIFT-100k Results (Phases 6, 6.5, 6.6)
 - **Harness Metrics:** Accurately isolates per-query latency distributions (p50, p95, p99) from full-batch throughput (QPS), tracks exact candidate distance evaluations, monitors persistent array storage vs peak process RSS, and provides distance-aware Recall@k for boundary ties.
@@ -45,7 +45,7 @@ The core educational philosophy is **learning ownership**: foundational algorith
   - IVF-Flat ($n_{\text{list}}=100, n_{\text{probe}}=20$): p50 = 17.75 ms, 55.9 QPS, Recall@10 = 0.9980 (21,481 distance ops)
 
 ### 6. Test Suite & Verification Gates
-- **329 passing unit and integration tests** in `pytest` executed completely offline in $<28$ seconds (1 opt-in live model download test deselected).
+- **377 passing unit and integration tests** in `pytest` executed completely offline in $<100$ seconds (1 opt-in live model download test deselected, 1 skipped).
 - Clean `git diff --check` with zero trailing whitespace or formatting warnings.
 - CI pipeline running across Python 3.10, 3.11, and 3.12.
 

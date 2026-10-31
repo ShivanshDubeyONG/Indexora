@@ -55,7 +55,7 @@ from indexora.persistence import load_index, save_index
 from indexora.pq import ProductQuantizer
 from indexora.topk import SearchResult, select_top_k
 
-__version__ = "0.1.0.dev0"
+__version__ = "1.0.0"
 
 __all__ = [
     "__version__",

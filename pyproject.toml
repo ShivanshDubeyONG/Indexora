@@ -4,17 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "indexora"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "A learning-first vector search engine built from scratch in Python and NumPy."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
+    { name = "Shivansh Dubey", email = "shivansh1.mitblr2024@learner.manipal.edu" },
     { name = "Indexora Contributors" }
 ]
 dependencies = [
     "numpy>=1.23.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ShivanshDubeyONG/Indexora"
+Repository = "https://github.com/ShivanshDubeyONG/Indexora"
+"Bug Tracker" = "https://github.com/ShivanshDubeyONG/Indexora/issues"
+Documentation = "https://github.com/ShivanshDubeyONG/Indexora#readme"
 
 [project.optional-dependencies]
 dev = [

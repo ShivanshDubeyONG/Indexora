@@ -1,7 +1,7 @@
 # Indexora
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests Passing](https://img.shields.io/badge/tests-372%20passed-success.svg)]()
+[![Tests Passing](https://img.shields.io/badge/tests-377%20passed-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
@@ -59,7 +59,7 @@ flowchart TD
 | **Exact (BLAS)** | `ExactBlasIndex` | Fast ($O(1)$) | Low for $N \le 10^4$ | Baseline ($4 \cdot N \cdot d$ B) | 100% | Datasets up to 10k vectors or when 100% recall is strictly required. |
 | **IVF-Flat** | `IVFFlatIndex` | Moderate ($K$-means) | Sub-linear ($O(\frac{N}{\text{nlist}} \cdot \text{nprobe})$) | Baseline ($+ \text{centroids}$) | High (tunable via `nprobe`) | Low-memory approximate search with fast build times on clustered data. |
 | **IVF-PQ** | `IVFPQIndex` | High (residual $K$-means) | Sub-linear ($O(\text{cand} \cdot M)$ table lookups) | **Very Low (15x–64x compression)** | Moderate to High | Memory-constrained environments; massive datasets that must fit in RAM. |
-| **HNSW** | `HNSWIndex` | High ($O(N \log N)$ graph construction) | **Ultra-low (empirical $O(\log N)$ with fixed $ef, M$)** | Moderate ($+ M$ edges/node) | **Very High (98%–100%)** | Low-latency applications (RAG, live search) prioritizing top-k retrieval speed. |
+| **HNSW** | `HNSWIndex` | High ($O(N \log N)$ graph construction) | Sub-linear (empirical with fixed $ef, M$) | Moderate ($+ M$ edges/node) | **Very High (98%–100%)** | High-dimensional approximate retrieval; note that small collections ($N \le 10^3$) may favor BLAS GEMM due to graph traversal interpreter overhead. |
 
 ---
 
@@ -219,6 +219,8 @@ Evaluation on the first 100,000 base vectors and 1,000 queries ($d=128$, $k=10$,
   <p><em>Figure 1: Verified SIFT-100k Recall@10 vs. Median Query Latency curve comparing Exact Reference, Exact BLAS, and IVF-Flat multi-probe parameter sweeps.</em></p>
 </div>
 
+For complete mathematical derivations, latency sampling protocols, and cryptographic checksums, see [`docs/BENCHMARK_METHODOLOGY.md`](docs/BENCHMARK_METHODOLOGY.md).
+
 **Key Takeaways & Limitations:**
 - **Exact Scan Baseline & Chunking Context:** BLAS Exact achieves $3.15\times$ higher throughput (19.5 vs. 6.2 QPS) and $1.51\times$ lower p50 latency than the coordinate-difference reference oracle under default bounded chunking (`max_db_chunk=32768`). In an unconstrained batched matrix GEMM scan with precomputed norms, direct BLAS reaches ~375–750 QPS. The default chunking bounds peak intermediate memory allocations by falling back to sequential single-query block scans when $N > 32768$.
 - **IVF-Flat Speedup:** Compared to the default bounded BLAS exact baseline, IVF-Flat (`nlist=100, nprobe=1`) provides a $78.7\times$ throughput speedup (1,534.6 vs. 19.5 QPS) at Recall@10 = 0.5287. Probing $n_{\text{probe}}=10$ lists achieves Recall@10 = 0.9791 with a $6.0\times$ throughput speedup (116.8 vs. 19.5 QPS). On batched queries against unconstrained BLAS matrix multiplication, Python candidate gathering overhead reduces IVF's wall-clock advantage unless `nprobe` is small or $N \gg 10^5$.
@@ -349,7 +351,10 @@ assert len(index) == 103
 ```
 
 - **ID Invariants:** All IDs are durable `int64` scalars (supporting zero, negative IDs, and non-sequential IDs). Duplicates and ID collisions raise explicit `ValueError`.
-- **HNSW Tombstones:** In HNSW, `delete()` applies tombstone markers (`_deleted_nodes`). Tombstoned vectors continue acting as navigable routing nodes in the graph hierarchy, preserving reachability without immediate expensive graph edge restructuring.
+- **Index-Specific Deletion Mechanics:**
+  - **HNSW:** `delete()` applies logical tombstones (`_deleted_nodes`). Nodes remain in the proximity graph to preserve multi-layer routing paths, but are filtered out from query results.
+  - **Exact Flat / BLAS:** Performs physical removal from underlying contiguous memory arrays.
+  - **IVF-Flat / IVF-PQ:** Removes matching entries directly from inverted posting lists.
 
 ### 2. Filtered Search (`filter_ids`)
 
@@ -369,7 +374,7 @@ res = index.search(query, k=5, filter_ids=lambda entity_id: entity_id > 50)
 
 ### 3. Safe Atomic Persistence (`save` & `load`)
 
-Indexes can be saved to a directory and reloaded with zero Python pickle reliance:
+Indexes can be saved to disk and reloaded with zero Python pickle reliance. Public/lab operations are strictly sandboxed within `storage/lab_indexes/` with path traversal rejection and root containment:
 
 ```python
 from indexora import save_index, load_index
@@ -431,7 +436,8 @@ python -m indexora.ui
    - Decoupled embedding latency ($t_{\text{embed}}$) from vector index retrieval latency ($t_{\text{search}}$).
    - Dynamic parameter controls (`nprobe`, `ef_search`, category filtering).
    - Result cards displaying Rank, Title, Category, Exact Top-k Match status, Squared L2 Distance, and Cosine Similarity.
-   - Graceful offline fallback with deterministic mock embedder when deep learning dependencies are absent.
+   - Genuine neural embeddings via `sentence-transformers` (optional `[semantic]` extra). Strictly avoids pseudo-random mock vector fallback in production search to ensure credible similarity scores.
+   - Evaluates **Vector Oracle Agreement** against the exact brute-force BLAS oracle.
 
 > **Data & Performance Disclosure:**
 > - Tabs 1–4 of the Lab use **synthetic numerical vectors in $\mathbb{R}^d$** generated from clustered Gaussian distributions to illustrate spatial indexing mechanics. Tab 5 demonstrates **genuine semantic text search** using dense 384-dimensional sentence embeddings.
@@ -479,7 +485,7 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
    ```bash
    pytest -q
    ```
-   Runs 372 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
+   Runs 377 tests covering BLAS kernels, IVF-Flat, Product Quantization, IVF-PQ, HNSW graphs, mutations, filtering, atomic disk persistence, and semantic retrieval.
 
 2. **Run the Offline Smoke Benchmark (5s):**
    ```bash
@@ -498,6 +504,7 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 
 ## Documentation & Deep Dives
 
+- **[`docs/BENCHMARK_METHODOLOGY.md`](docs/BENCHMARK_METHODOLOGY.md):** Rigorous benchmarking methodology, latency sampling protocols, hardware environment specifications, and Texmex SIFT-100k provenance.
 - **[`docs/architecture.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/architecture.md):** Comprehensive technical architecture, mathematical foundations, data structures, and trade-off disclosures.
 - **[`docs/interview_prep.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/interview_prep.md):** 16 in-depth technical interview questions, rigorous answers, and live demonstration script.
 - **[`docs/DEMO_WALKTHROUGH.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview demonstration guide.
@@ -509,3 +516,10 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 - `plan/implementation.md`: 14-phase acceptance-gated roadmap and ownership policy (v3.0)
 - `docs/phase1_learning_guide.md`: Phase 1 concepts, hand-worked examples, and exercises
 - `docs/phase1_test_spec.md`: Phase 1 test matrix and edge-case contracts
+
+---
+
+## License
+
+Indexora is released under the [MIT License](LICENSE).
+Copyright (c) 2026 Shivansh Dubey and Indexora Contributors.

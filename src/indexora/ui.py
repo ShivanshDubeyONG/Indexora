@@ -1095,11 +1095,19 @@ def main() -> None:
     # Tab 3: Accuracy & Performance Lab
     # =========================================================================
     with tab_benchmark:
-        st.markdown("### Accuracy vs. Speed Benchmark Sweep")
-        st.markdown(
-            "Execute an empirical sweep comparing all 5 index implementations on identical queries with "
-            "deterministic ground-truth verification."
+        subtab_lab, subtab_sift = st.tabs(
+            [
+                "🧪 Interactive Lab Sweep (Synthetic N=120)",
+                "📊 SIFT-100K Benchmark Evidence (Recorded Scale Run)",
+            ]
         )
+
+        with subtab_lab:
+            st.markdown("### Accuracy vs. Speed Benchmark Sweep (Interactive Synthetic)")
+            st.markdown(
+                "Execute an empirical sweep comparing all 5 index implementations on identical queries with "
+                "deterministic ground-truth verification."
+            )
 
         b_k = st.slider("Benchmark Top-k", min_value=1, max_value=min(ds.N, 20), value=5, key="bench_k")
 
@@ -1246,6 +1254,145 @@ def main() -> None:
                 """
                 <div class="idx-callout">
                     <strong>Systems Insight:</strong> On small synthetic datasets (e.g. N=120), BLAS exact scan can report lower wall-clock latency than HNSW or IVF because Level-3 GEMM runs in optimized C/Fortran libraries, whereas Python-level graph traversals incur bytecode interpreter overhead. Approximate methods prove their throughput advantage at scale (N ≥ 50,000).
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with subtab_sift:
+            st.markdown("### SIFT-100K Canonical Benchmark Evidence")
+            st.markdown(
+                "Empirical retrieval performance, latency distributions, and throughput measured on the "
+                "standard Texmex SIFT-100k benchmark ($N=100,000$ base vectors, $Q=1,000$ queries, $d=128$, squared L2)."
+            )
+
+            st.markdown(
+                """
+                <div class="idx-callout" style="margin-bottom: 1.25rem;">
+                    <strong>Benchmarking Provenance Notice:</strong>
+                    <ul style="margin: 0.35rem 0 0 1.2rem; padding: 0;">
+                        <li><strong>Interactive Index Lab (Subtab 1):</strong> Executes live in-browser on small synthetic clustered datasets (<code>N=120, d=8</code>). Designed for visual intuition and algorithmic debugging; not representative of large-scale throughput.</li>
+                        <li><strong>SIFT-100K Benchmark (Subtab 2):</strong> Visualizes precomputed, cryptographically verified benchmark artifacts recorded under strictly controlled hardware conditions. <em>The Streamlit application does not execute SIFT-100K in real time.</em></li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Highlight KPI Metrics
+            kpi1, kpi2, kpi3 = st.columns(3)
+            with kpi1:
+                st.metric(
+                    "Max Speedup vs. BLAS",
+                    "78.7× QPS",
+                    delta="IVF-Flat (nlist=100, nprobe=1): 1,534.6 QPS vs 19.5 QPS",
+                )
+            with kpi2:
+                st.metric(
+                    "Balanced Operating Point",
+                    "91.3% Recall@10",
+                    delta="IVF-Flat (nlist=100, nprobe=5): 4.53ms p50 (17.9× distance reduction)",
+                )
+            with kpi3:
+                st.metric(
+                    "Near-Lossless Retrieval",
+                    "99.8% Recall@10",
+                    delta="IVF-Flat (nlist=100, nprobe=20): 17.75ms p50 (21.5% distance scan)",
+                )
+
+            st.markdown("---")
+
+            # Environment & Provenance Expander
+            with st.expander("Hardware, Software Environment & Provenance Details", expanded=False):
+                env_col1, env_col2 = st.columns(2)
+                with env_col1:
+                    st.markdown(
+                        """
+                        **Hardware & Runtime Environment:**
+                        - **Platform:** Windows 10 AMD64
+                        - **CPU:** Intel64 Family 6 Model 186 Stepping 2, GenuineIntel
+                        - **Python:** 3.10.11 (64-bit CPython)
+                        - **NumPy:** 2.2.6 (linked to optimized BLAS)
+                        - **Git Commit:** `c84a3dc`
+                        - **Timestamp:** `2026-10-29T12:24:12Z` (UTC)
+                        """
+                    )
+                with env_col2:
+                    st.markdown(
+                        """
+                        **Dataset Specification & Cryptographic Checksums:**
+                        - **Dataset:** Canonical SIFT-100k subset (Texmex SIFT1M prefix)
+                        - **Vectors:** N=100,000 base, Q=1,000 queries, d=128, float32
+                        - **Distance Metric:** Squared Euclidean Distance ($||q - x||_2^2$)
+                        - **Base Vectors SHA-256:** `21f66e2975057b5728ba56de1c825bac4f4d89d596609ae985741c6242631816`
+                        - **Query Vectors SHA-256:** `f7fc9be140accdfd64116c2fa2365ecdb69b8f084970c6b0532db5ff79ac8fdc`
+                        - **Timing Protocol:** 500 individual per-query samples (2 warmups); 5 full-batch repetitions for QPS
+                        """
+                    )
+                st.info(
+                    "**Scope Disclosure:** This historical SIFT-100K benchmark evaluated Exact Reference, Exact BLAS, "
+                    "and IVF-Flat sweeps. HNSW and IVF-PQ were evaluated in the interactive lab and smoke suites, and "
+                    "were not included in this specific historical SIFT-100K batch run."
+                )
+
+            # Benchmark Plots
+            st.markdown("#### SIFT-100K Benchmark Visualizations")
+            plot_col1, plot_col2 = st.columns(2)
+            lat_plot_path = Path("results/sift100k_p66/recall_vs_latency.png")
+            dc_plot_path = Path("results/sift100k_p66/recall_vs_distance_computations.png")
+
+            with plot_col1:
+                if lat_plot_path.exists():
+                    st.image(str(lat_plot_path), caption="SIFT-100k: Recall@10 vs. Median Query Latency (p50)", use_container_width=True)
+                else:
+                    st.warning("Latency plot artifact not found at results/sift100k_p66/recall_vs_latency.png")
+
+            with plot_col2:
+                if dc_plot_path.exists():
+                    st.image(str(dc_plot_path), caption="SIFT-100k: Recall@10 vs. Distance Computations / Query", use_container_width=True)
+                else:
+                    st.warning("Distance plot artifact not found at results/sift100k_p66/recall_vs_distance_computations.png")
+
+            # Benchmark Summary Table
+            st.markdown("#### Complete Traceable Summary Table (`benchmark_summary.csv`)")
+            summary_csv_path = Path("results/sift100k_p66/benchmark_summary.csv")
+            if summary_csv_path.exists():
+                df_sift = pd.read_csv(summary_csv_path)
+                display_cols = [
+                    "index_name",
+                    "nlist",
+                    "nprobe",
+                    "recall_at_k",
+                    "per_query_p50_ms",
+                    "per_query_p95_ms",
+                    "batch_qps",
+                    "distance_computations",
+                    "peak_rss_mib",
+                    "build_time_sec",
+                ]
+                df_display = df_sift[display_cols].copy()
+                df_display.columns = [
+                    "Index Architecture",
+                    "nlist",
+                    "nprobe",
+                    "Recall@10",
+                    "p50 Latency (ms)",
+                    "p95 Latency (ms)",
+                    "Throughput (QPS)",
+                    "Distance Ops / Query",
+                    "Peak RSS (MiB)",
+                    "Build Time (s)",
+                ]
+                st.dataframe(df_display, use_container_width=True)
+            else:
+                st.warning("Benchmark CSV artifact not found at results/sift100k_p66/benchmark_summary.csv")
+
+            st.markdown(
+                """
+                <div class="idx-callout" style="margin-top: 1rem;">
+                    <strong>Documentation & Reproducibility Reference:</strong> For detailed mathematical formulations,
+                    metric definitions, and reproduction commands, see <code>docs/BENCHMARK_METHODOLOGY.md</code>.
+                    To reproduce offline smoke benchmarks, run: <code>python -m indexora.benchmark --smoke --no-plot</code>.
                 </div>
                 """,
                 unsafe_allow_html=True,
