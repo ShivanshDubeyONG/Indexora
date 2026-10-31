@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /* LIGHT MODE (Clean, light airy blue-white) */
+    /* LIGHT MODE (Clean, light airy blue-white Hallmark aesthetic) */
     --bg-canvas: #F8FAFC;
     --bg-surface-card: #FFFFFF;
     --bg-surface-subtle: #F2F8FF;
@@ -23,31 +23,31 @@
     --border-subtle: #E2E8F0;
   }
 
-  /* DARK MODE (Refined Graphitish Blue / Obsidian Slate) */
+  /* DARK MODE (Ultra-Clean Obsidian Graphite — No Tacky Murky Blue Tint) */
   html.dark {
-    --bg-canvas: #0B1118;
-    --bg-surface-card: #111A24;
-    --bg-surface-subtle: #152230;
-    --bg-surface-secondary: #1B2B3D;
+    --bg-canvas: #0A0B0E;
+    --bg-surface-card: #121418;
+    --bg-surface-subtle: #181A20;
+    --bg-surface-secondary: #20232A;
 
     --accent-primary: #3B82F6;
     --accent-hover: #60A5FA;
-    --accent-subtle: #1E3A5F;
+    --accent-subtle: rgba(59, 130, 246, 0.12);
 
-    --text-graphite-dark: #F8FAFC;
-    --text-graphite: #E2E8F0;
-    --text-graphite-muted: #94A3B8;
-    --text-graphite-subtle: #64748B;
+    --text-graphite-dark: #F3F4F6;
+    --text-graphite: #E5E7EB;
+    --text-graphite-muted: #9CA3AF;
+    --text-graphite-subtle: #6B7280;
 
-    --border-color: #243548;
-    --border-subtle: #1E2B3A;
+    --border-color: #24272E;
+    --border-subtle: #1B1D22;
   }
 
   body {
     background-color: var(--bg-canvas);
     color: var(--text-graphite);
     letter-spacing: -0.01em;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Custom subtle scrollbars */
@@ -72,5 +72,5 @@
   background: radial-gradient(circle 800px at 50% -120px, rgba(57, 134, 217, 0.08), transparent 70%);
 }
 html.dark .ambient-glow {
-  background: radial-gradient(circle 800px at 50% -120px, rgba(59, 130, 246, 0.12), transparent 70%);
+  background: radial-gradient(circle 800px at 50% -120px, rgba(59, 130, 246, 0.06), transparent 70%);
 }

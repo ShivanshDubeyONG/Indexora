@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SystemStatus, DatasetCurrent } from '../types';
 import { generateDataset } from '../api';
+import { ArchitectureShowpiece } from '../components/ArchitectureShowpiece';
 import { 
   ArrowRight, 
   Layers, 
@@ -75,6 +76,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ status, dataset, onD
           </div>
         </div>
       </section>
+
+      {/* Interactive Architecture Visualizer Showpiece */}
+      <ArchitectureShowpiece />
 
       {/* 2. Multi-Stage Retrieval Pipeline Map */}
       <section className="space-y-4">

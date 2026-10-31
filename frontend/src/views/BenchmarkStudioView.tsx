@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { runBenchmarkSweep, fetchSiftEvidence } from '../api';
 import { BenchmarkSweepResponse, SiftEvidence, DatasetCurrent } from '../types';
+import { ParetoChart } from '../components/ParetoChart';
 import { 
   Play, 
   BarChart2, 
@@ -309,6 +310,9 @@ export const BenchmarkStudioView: React.FC<BenchmarkStudioViewProps> = ({ datase
                 </table>
               </div>
 
+              {/* Interactive Recall vs Latency Pareto Frontier & Memory Waterfall */}
+              <ParetoChart metrics={sweepResult.metrics} />
+
               {/* Metric Cards Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {sweepResult.metrics.map((m) => (
@@ -478,6 +482,9 @@ export const BenchmarkStudioView: React.FC<BenchmarkStudioViewProps> = ({ datase
                   </tbody>
                 </table>
               </div>
+
+              {/* SIFT-100K Pareto Frontier & Memory Visualization */}
+              <ParetoChart metrics={siftData.sift100k_baseline} />
 
               {/* IVF-PQ Compression Benchmark */}
               <div className="bg-surface-card border border-border rounded-xl p-5 shadow-card overflow-x-auto">
