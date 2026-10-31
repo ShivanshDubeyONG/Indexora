@@ -36,16 +36,24 @@ from indexora.lab import (
     evaluate_index_search,
     generate_lab_dataset,
 )
-from indexora.semantic import (
-    DEFAULT_EMBEDDING_MODEL,
-    Document,
-    SemanticSearchEngine,
-    SemanticSearchResult,
-    build_semantic_engine,
-    check_semantic_availability,
-    is_sentence_transformers_available,
-    load_demo_corpus,
-)
+try:
+    from indexora.semantic import (
+        DEFAULT_EMBEDDING_MODEL,
+        Document,
+        SemanticSearchEngine,
+        SemanticSearchResult,
+        build_semantic_engine,
+        is_sentence_transformers_available,
+        load_demo_corpus,
+    )
+except ImportError:
+    DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+    Document = Any  # type: ignore[misc,assignment]
+    SemanticSearchEngine = Any  # type: ignore[misc,assignment]
+    SemanticSearchResult = Any  # type: ignore[misc,assignment]
+    build_semantic_engine = None  # type: ignore[assignment]
+    is_sentence_transformers_available = lambda: False  # type: ignore[assignment]
+    load_demo_corpus = lambda: []  # type: ignore[assignment]
 
 
 def _apply_custom_styling() -> None:

@@ -1,4 +1,4 @@
-# Core vector search engine and interactive UI dependencies
+# Core vector search engine and interactive UI dependencies (Indexora v1.0.1)
 numpy>=1.23.0
 pandas>=1.4.0
 matplotlib>=3.5.0
