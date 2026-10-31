@@ -1,9 +1,14 @@
-# Core vector search engine and interactive UI dependencies (Indexora v1.0.1)
+# Core vector search engine and API service dependencies (Indexora v1.0.1)
 numpy>=1.23.0
-pandas>=1.4.0
 matplotlib>=3.5.0
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
+httpx>=0.24.0
+
+# Optional Streamlit & Pandas legacy UI support
+pandas>=1.4.0
 streamlit>=1.30.0
 
-# Install local indexora package from src
--e .
-
+# Install local indexora package with api dependencies
+-e .[api]

@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+node_modules
+frontend/node_modules
+.venv
+venv
+ci_benchmark_output
+ci_job_failed.log

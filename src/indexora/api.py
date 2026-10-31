@@ -753,9 +753,24 @@ def search_semantic(req: SemanticSearchRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/healthz", tags=["Health"])
+def health_check() -> dict[str, str]:
+    """Lightweight health-check endpoint for Render / Kubernetes."""
+    return {"status": "ok", "engine": "Indexora", "version": "1.0.0"}
+
+
 # -----------------------------------------------------------------------------
-# Static Frontend Mount (Serves Built React Production Assets)
+# Static Frontend Mount & SPA Routing Fallback
 # -----------------------------------------------------------------------------
 _FRONTEND_DIST = _SRC_DIR.parent / "frontend" / "dist"
 if _FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"Starting Indexora Production Server on {host}:{port}")
+    uvicorn.run("indexora.api:app", host=host, port=port, reload=False)

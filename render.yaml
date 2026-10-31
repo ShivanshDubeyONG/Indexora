@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: indexora
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "python -m uvicorn indexora.api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PORT
+        value: 10000
+    plan: free
+    healthCheckPath: /healthz

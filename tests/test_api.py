@@ -119,3 +119,11 @@ def test_api_serves_frontend_html() -> None:
     assert res.status_code == 200
     assert "Indexora" in res.text
     assert "<div id=\"root\"></div>" in res.text
+
+
+def test_api_health_check() -> None:
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["engine"] == "Indexora"
