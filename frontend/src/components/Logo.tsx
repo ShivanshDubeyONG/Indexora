@@ -77,4 +77,3 @@ export const Logo: React.FC<LogoProps> = ({ className = '', size = 34 }) => {
     </svg>
   );
 };
-

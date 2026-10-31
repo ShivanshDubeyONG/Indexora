@@ -44,31 +44,31 @@ export const App: React.FC = () => {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'overview' && (
-          <OverviewView 
-            status={status} 
-            dataset={dataset} 
-            onDatasetUpdated={loadState} 
+          <OverviewView
+            status={status}
+            dataset={dataset}
+            onDatasetUpdated={loadState}
           />
         )}
         {activeTab === 'search' && (
-          <SearchLabView 
-            dataset={dataset} 
+          <SearchLabView
+            dataset={dataset}
           />
         )}
         {activeTab === 'benchmarks' && (
-          <BenchmarkStudioView 
-            dataset={dataset} 
+          <BenchmarkStudioView
+            dataset={dataset}
           />
         )}
         {activeTab === 'explorer' && (
-          <VectorExplorerView 
-            dataset={dataset} 
+          <VectorExplorerView
+            dataset={dataset}
           />
         )}
         {activeTab === 'management' && (
-          <IndexManagementView 
-            status={status} 
-            onStateChanged={loadState} 
+          <IndexManagementView
+            status={status}
+            onStateChanged={loadState}
           />
         )}
         {activeTab === 'semantic' && (
@@ -80,4 +80,3 @@ export const App: React.FC = () => {
     </div>
   );
 };
-

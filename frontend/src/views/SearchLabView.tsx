@@ -17,7 +17,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
   const [efSearch, setEfSearch] = useState(32);
   const [filterMode, setFilterMode] = useState('none');
   const [customFilterStr, setCustomFilterStr] = useState('1000, 1001, 1002');
-  
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -413,8 +413,8 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                   </thead>
                   <tbody key={flashKey} className="divide-y divide-border bg-surface-card text-graphite">
                     {result.results.map((item, idx) => (
-                      <tr 
-                        key={item.id} 
+                      <tr
+                        key={item.id}
                         className="hover:bg-surface-subtle transition-colors animate-fade-in"
                         style={{ animationDelay: `${idx * 25}ms` }}
                       >

@@ -364,4 +364,3 @@ def test_index_cache_query_params_do_not_rebuild():
         # Search executes with different nprobe without rebuilding
         res = reused_idx.search(ds.queries[0], k=2, nprobe=nprobe)
         assert len(res.ids) == 2
-

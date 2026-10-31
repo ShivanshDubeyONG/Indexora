@@ -113,7 +113,7 @@ export const ArchitectureShowpiece: React.FC = () => {
               <g className="transition-opacity">
                 <rect x="30" y="195" width="560" height="75" rx="8" fill="currentColor" className="text-surface-secondary/60 dark:text-surface-secondary/40" />
                 <text x="45" y="215" fill="var(--text-graphite-muted)" fontSize="11" fontFamily="JetBrains Mono" fontWeight="bold">Layer 0 (Ground Truth Graph, M=16, efSearch=32)</text>
-                
+
                 {/* Connectors */}
                 <line x1="140" y1="245" x2="240" y2="245" stroke="#94A3B8" strokeWidth="1" />
                 <line x1="240" y1="245" x2="360" y2="245" stroke="#94A3B8" strokeWidth="1" />
@@ -124,7 +124,7 @@ export const ArchitectureShowpiece: React.FC = () => {
                 <circle cx="240" cy="245" r="4.5" fill="#94A3B8" />
                 <circle cx="360" cy="245" r="4.5" fill="#94A3B8" />
                 <circle cx="480" cy="245" r="5.5" fill="var(--accent-primary)" stroke="#FFFFFF" strokeWidth="1.5" />
-                
+
                 {/* Nearest Neighbor Target */}
                 <circle cx="540" cy="238" r="8" fill="#10B981" stroke="#FFFFFF" strokeWidth="2" className="animate-pulse" />
                 <text x="505" y="260" fill="#10B981" fontSize="10" fontFamily="JetBrains Mono" fontWeight="bold">Nearest Top-1</text>

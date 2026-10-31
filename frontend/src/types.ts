@@ -155,4 +155,3 @@ export interface SemanticSearchResponse {
   oracle_agreement_pct: number;
   ranked_documents: RankedDocument[];
 }
-

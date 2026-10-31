@@ -1,19 +1,19 @@
 import React from 'react';
-import { 
-  Compass, 
-  Search, 
-  BarChart3, 
-  Layers, 
-  Sliders, 
-  BookOpen 
+import {
+  Compass,
+  Search,
+  BarChart3,
+  Layers,
+  Sliders,
+  BookOpen
 } from 'lucide-react';
 
-export type NavTabId = 
-  | 'overview' 
-  | 'search' 
-  | 'benchmarks' 
-  | 'explorer' 
-  | 'management' 
+export type NavTabId =
+  | 'overview'
+  | 'search'
+  | 'benchmarks'
+  | 'explorer'
+  | 'management'
   | 'semantic';
 
 interface NavProps {
@@ -59,4 +59,3 @@ export const Navigation: React.FC<NavProps> = ({ activeTab, onChangeTab }) => {
     </nav>
   );
 };
-

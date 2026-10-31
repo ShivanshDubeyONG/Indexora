@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { fetchSemanticStatus, searchSemantic } from '../api';
 import { SemanticStatus, SemanticSearchResponse } from '../types';
-import { 
-  BookOpen, 
-  Search, 
-  AlertTriangle, 
-  Tag, 
-  CheckCircle2, 
+import {
+  BookOpen,
+  Search,
+  AlertTriangle,
+  Tag,
+  CheckCircle2,
   Terminal,
   ChevronDown,
   ChevronUp,
@@ -86,7 +86,7 @@ export const SemanticSearchView: React.FC = () => {
   // Filter corpus documents
   const filteredCorpus = status?.corpus_sample?.filter((doc) => {
     const matchesTab = activeCorpusTab === 'all' || doc.category.toLowerCase() === activeCorpusTab.toLowerCase();
-    const matchesSearch = !corpusSearchTerm.trim() || 
+    const matchesSearch = !corpusSearchTerm.trim() ||
       doc.title.toLowerCase().includes(corpusSearchTerm.toLowerCase()) ||
       doc.text.toLowerCase().includes(corpusSearchTerm.toLowerCase()) ||
       doc.tags.some((t) => t.toLowerCase().includes(corpusSearchTerm.toLowerCase()));
@@ -105,7 +105,7 @@ export const SemanticSearchView: React.FC = () => {
             Natural Language Semantic Retrieval
           </h1>
           <p className="text-sm text-graphite-muted mt-1 max-w-2xl">
-            Search across a curated technical corpus of 25 engineering documents using dense sentence embeddings 
+            Search across a curated technical corpus of 25 engineering documents using dense sentence embeddings
             and Indexora's native vector engines (Exact BLAS, IVF-Flat, and HNSW).
           </p>
         </div>
@@ -123,7 +123,7 @@ export const SemanticSearchView: React.FC = () => {
                 Semantic Text Search Unavailable in this Environment
               </h3>
               <p className="text-xs text-graphite leading-relaxed">
-                Real semantic retrieval requires neural sentence embeddings (<code className="bg-surface-secondary px-1.5 py-0.5 rounded font-mono text-accent">sentence-transformers</code> and <code className="bg-surface-secondary px-1.5 py-0.5 rounded font-mono text-accent">PyTorch</code>). 
+                Real semantic retrieval requires neural sentence embeddings (<code className="bg-surface-secondary px-1.5 py-0.5 rounded font-mono text-accent">sentence-transformers</code> and <code className="bg-surface-secondary px-1.5 py-0.5 rounded font-mono text-accent">PyTorch</code>).
                 These optional deep-learning packages are not installed in the current cloud execution environment.
               </p>
             </div>
@@ -136,7 +136,7 @@ export const SemanticSearchView: React.FC = () => {
                 Why pseudo-random mock search is disabled:
               </p>
               <p className="text-graphite-muted leading-relaxed">
-                Indexora strictly avoids substituting pseudo-random or hash-derived vectors for semantic retrieval. 
+                Indexora strictly avoids substituting pseudo-random or hash-derived vectors for semantic retrieval.
                 Random vectors lack semantic manifold topology, and ranking them generates misleading similarity scores and false ground-truth claims.
               </p>
             </div>

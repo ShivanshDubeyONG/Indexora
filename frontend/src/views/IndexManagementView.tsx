@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  addVectorMutation, 
-  deleteVectorMutation, 
-  listSavedIndexes, 
-  saveNamedIndex, 
-  loadNamedIndex 
+import {
+  addVectorMutation,
+  deleteVectorMutation,
+  listSavedIndexes,
+  saveNamedIndex,
+  loadNamedIndex
 } from '../api';
 import { SystemStatus } from '../types';
-import { 
-  Sliders, 
-  PlusCircle, 
-  Trash2, 
-  Save, 
-  FolderOpen, 
-  ShieldCheck, 
-  CheckCircle2, 
+import {
+  Sliders,
+  PlusCircle,
+  Trash2,
+  Save,
+  FolderOpen,
+  ShieldCheck,
+  CheckCircle2,
   AlertCircle,
   HardDrive,
   FileCode
@@ -414,4 +414,3 @@ export const IndexManagementView: React.FC<IndexManagementViewProps> = ({ status
     </div>
   );
 };
-

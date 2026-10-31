@@ -2,16 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { runBenchmarkSweep, fetchSiftEvidence } from '../api';
 import { BenchmarkSweepResponse, SiftEvidence, DatasetCurrent } from '../types';
 import { ParetoChart } from '../components/ParetoChart';
-import { 
-  Play, 
-  BarChart2, 
-  Database, 
-  ShieldCheck, 
-  Zap, 
-  Clock, 
-  HardDrive, 
-  Percent, 
-  CheckCircle2, 
+import {
+  Play,
+  BarChart2,
+  Database,
+  ShieldCheck,
+  Zap,
+  Clock,
+  HardDrive,
+  Percent,
+  CheckCircle2,
   SlidersHorizontal,
   RefreshCw
 } from 'lucide-react';
@@ -89,7 +89,7 @@ export const BenchmarkStudioView: React.FC<BenchmarkStudioViewProps> = ({ datase
               Algorithmic Benchmark Studio
             </h1>
             <p className="text-sm text-graphite-muted mt-1 max-w-2xl">
-              Compare exact brute force, partitioning-based (IVF-Flat), compressed subspace quantization (IVF-PQ), 
+              Compare exact brute force, partitioning-based (IVF-Flat), compressed subspace quantization (IVF-PQ),
               and hierarchical proximity graphs (HNSW) under identical recall and latency criteria.
             </p>
           </div>
@@ -362,7 +362,7 @@ export const BenchmarkStudioView: React.FC<BenchmarkStudioViewProps> = ({ datase
                 No Active Live Sweep Run Yet
               </h3>
               <p className="text-xs text-graphite-muted max-w-md mx-auto">
-                Configure your search parameters above and click "Run Live Benchmark Sweep" to evaluate 
+                Configure your search parameters above and click "Run Live Benchmark Sweep" to evaluate
                 all 5 index architectures in real-time against mathematical ground truth.
               </p>
             </div>
@@ -549,4 +549,3 @@ export const BenchmarkStudioView: React.FC<BenchmarkStudioViewProps> = ({ datase
     </div>
   );
 };
-

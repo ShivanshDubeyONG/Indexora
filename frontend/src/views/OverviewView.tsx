@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { SystemStatus, DatasetCurrent } from '../types';
 import { generateDataset } from '../api';
 import { ArchitectureShowpiece } from '../components/ArchitectureShowpiece';
-import { 
-  ArrowRight, 
-  Layers, 
-  Cpu, 
-  SlidersHorizontal, 
-  CheckCircle2, 
-  Database, 
-  RefreshCw 
+import {
+  ArrowRight,
+  Layers,
+  Cpu,
+  SlidersHorizontal,
+  CheckCircle2,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 
 interface OverviewViewProps {
@@ -409,4 +409,3 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ status, dataset, onD
     </div>
   );
 };
-

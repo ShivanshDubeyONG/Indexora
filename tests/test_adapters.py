@@ -259,4 +259,3 @@ def test_hnswlib_adapter_lifecycle_and_id_mapping(monkeypatch: pytest.MonkeyPatc
     assert res.distances[0, 1] == pytest.approx(0.5, abs=1e-5)
     assert np.all(res.mask)
     mock_inner_index.set_ef.assert_called_with(30)
-

@@ -1,8 +1,11 @@
 """Integration tests for Indexora FastAPI service layer."""
 
 import pytest
-from fastapi.testclient import TestClient
 
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
+
+from fastapi.testclient import TestClient
 from indexora.api import app
 
 client = TestClient(app)
@@ -116,4 +119,3 @@ def test_api_serves_frontend_html() -> None:
     assert res.status_code == 200
     assert "Indexora" in res.text
     assert "<div id=\"root\"></div>" in res.text
-
