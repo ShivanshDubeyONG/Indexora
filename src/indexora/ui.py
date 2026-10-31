@@ -57,48 +57,107 @@ except ImportError:
 
 
 def _apply_custom_styling() -> None:
-    """Inject premium, modern dark-tech developer-tool styling inspired by GridPulse, Linear, and Vercel."""
+    """Inject clean scientific computing platform design system with refined light blue palette."""
     st.markdown(
         """
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+        <script>
+        // Ensure Streamlit localStorage theme is forced to light so browser doesn't apply cached dark CSS
+        try {
+            if (window.localStorage && window.localStorage.getItem("stActiveTheme") !== "light") {
+                window.localStorage.setItem("stActiveTheme", "light");
+            }
+        } catch (e) {}
+        </script>
 
         <style>
         /* =========================================================================
-           INDEXORA DESIGN SYSTEM: GRIDPULSE / LINEAR / VERCEL INSPIRED
-           Palette: Midnight Slate & Deep Zinc with Electric Indigo/Sky Cyan Accents
-           Canvas: #090d16 | Surface: #0e1424 | Surface Elevated: #131b30
-           Borders: rgba(255, 255, 255, 0.08) | Accent: #6366f1 | Cyan: #38bdf8
-           Headings: Montserrat | Body: Poppins | Code/Metrics: JetBrains Mono
+           INDEXORA DESIGN SYSTEM: SCIENTIFIC COMPUTING LIGHT PALETTE
+           Canvas Background: #F2F8FF (very light blue, almost white)
+           Secondary Surface / Sidebar / Cards: #E5F1FC (soft pale blue)
+           Elevated Surface: #FFFFFF (crisp white)
+           Primary Accent: #3986D9 (clean medium blue)
+           Dark / Headings / Text: #303943 (graphite)
+           Secondary / Muted Text: #687583 (muted graphite)
+           Borders: #D5E2EF (subtle blue-grey)
         ========================================================================= */
 
-        /* 1. Global Reset & App Foundation */
-        .stApp {
-            background-color: #090d16 !important;
-            color: #f8fafc !important;
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        /* 1. Global CSS Variables & Canvas Reset */
+        :root, html, body, .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stAppViewContainer"] > .main,
+        section.main,
+        .main,
+        .block-container,
+        [data-testid="stMainBlockContainer"],
+        [data-testid="stBottom"],
+        div[class*="stAppViewContainer"],
+        section[class*="main"] {
+            --primary-color: #3986D9 !important;
+            --background-color: #F2F8FF !important;
+            --secondary-background-color: #E5F1FC !important;
+            --text-color: #303943 !important;
+            --font: 'Inter', sans-serif !important;
+            background-color: #F2F8FF !important;
+            background: #F2F8FF !important;
+            color: #303943 !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             letter-spacing: -0.01em;
         }
 
-        /* Ambient subtle radial glow */
+        .stApp {
+            max-width: 100vw;
+            overflow-x: hidden;
+        }
+
+        /* Ambient soft blue gradient top wash */
         .stApp::before {
             content: "";
             position: fixed;
-            top: 0; left: 0; right: 0; height: 320px;
-            background: radial-gradient(circle 800px at 50% -120px, rgba(99, 102, 241, 0.14), transparent 70%);
+            top: 0; left: 0; right: 0; height: 280px;
+            background: radial-gradient(circle 900px at 50% -140px, rgba(57, 134, 217, 0.08), transparent 70%);
             pointer-events: none;
             z-index: 0;
         }
 
-        /* Hide Streamlit Chrome & Watermarks */
+        /* Hide default Streamlit footer & watermark */
         #MainMenu, footer {
             display: none !important;
         }
-        [data-testid="stHeader"] {
-            background-color: rgba(9, 13, 22, 0.85) !important;
+        [data-testid="stHeader"], [data-testid="stToolbar"] {
+            background-color: rgba(242, 248, 255, 0.95) !important;
+            background: rgba(242, 248, 255, 0.95) !important;
             backdrop-filter: blur(12px) !important;
             -webkit-backdrop-filter: blur(12px) !important;
+            border-bottom: 1px solid #D5E2EF !important;
+        }
+
+        /* 2. Sidebar Shell & Sidebar Components */
+        [data-testid="stSidebar"],
+        [data-testid="stSidebar"] > div,
+        [data-testid="stSidebarContent"],
+        [data-testid="stSidebarUserContent"],
+        section[data-testid="stSidebar"],
+        section[data-testid="stSidebar"] > div {
+            background-color: #E5F1FC !important;
+            background: #E5F1FC !important;
+            border-right: 1px solid #D5E2EF !important;
+            color: #303943 !important;
+        }
+        [data-testid="stSidebar"] hr {
+            border-color: #D5E2EF !important;
+            margin: 1.25rem 0 !important;
+        }
+        .sidebar-section-title {
+            font-size: 0.72rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
+            color: #687583 !important;
+            margin-bottom: 0.85rem !important;
         }
 
         /* Sidebar collapse / expand buttons */
@@ -114,47 +173,69 @@ def _apply_custom_styling() -> None:
             width: 2.25rem !important;
             height: 2.25rem !important;
             border-radius: 8px !important;
-            background: rgba(255, 255, 255, 0.06) !important;
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            color: #cbd5e1 !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
+            color: #303943 !important;
             cursor: pointer !important;
             transition: all 0.15s ease !important;
             pointer-events: auto !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
         }
         [data-testid="stSidebarCollapseButton"] button:hover,
         [data-testid="stExpandSidebarButton"] button:hover {
-            color: #ffffff !important;
-            background: rgba(255, 255, 255, 0.14) !important;
-            border-color: rgba(99, 102, 241, 0.5) !important;
-            box-shadow: 0 0 10px rgba(99, 102, 241, 0.3) !important;
+            color: #3986D9 !important;
+            background: #E5F1FC !important;
+            border-color: #3986D9 !important;
+            box-shadow: 0 2px 6px rgba(57, 134, 217, 0.15) !important;
         }
 
-        /* 2. Typography Hierarchy */
-        html, body, .stMarkdown p, .stMarkdown li, .stMarkdown div, label {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif !important;
-            color: #94a3b8;
+        /* 3. Typography & Material Icons Preservation */
+        html, body, .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown div, label,
+        [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+            color: #303943 !important;
         }
-        /* Preserve Streamlit icon font so ligatures (arrow_downward, expand_more) render as icons */
-        [data-testid="stIconMaterial"],
-        .material-symbols-rounded,
-        .material-icons,
+        /* CRITICAL: Preserve Material Symbols & Icons font ligatures so icons render cleanly */
+        [data-testid*="stIcon"],
+        [data-testid*="Icon"],
         [data-testid="stExpanderToggleIcon"],
-        [data-testid="stExpanderToggleIcon"] * {
-            font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
+        [data-testid="stExpanderToggleIcon"] *,
+        .material-symbols-rounded,
+        .material-symbols-sharp,
+        .material-symbols-outlined,
+        .material-icons {
+            font-family: 'Material Symbols Rounded', 'Material Icons', 'Material Symbols Outlined', sans-serif !important;
+            font-style: normal !important;
+            font-weight: normal !important;
+            text-transform: none !important;
+            letter-spacing: normal !important;
+            word-wrap: normal !important;
+            white-space: nowrap !important;
+            direction: ltr !important;
+            -webkit-font-smoothing: antialiased !important;
+            text-rendering: optimizeLegibility !important;
         }
         h1, h2, h3, h4, h5, h6, .idx-title, .idx-card-title {
             font-family: 'Montserrat', sans-serif !important;
             font-weight: 600 !important;
             letter-spacing: -0.02em !important;
-            color: #f8fafc !important;
+            color: #303943 !important;
         }
         h1, .idx-title {
             font-weight: 700 !important;
             letter-spacing: -0.03em !important;
         }
         strong, b {
-            color: #f8fafc !important;
+            color: #1E293B !important;
             font-weight: 600 !important;
+        }
+        .stMarkdown p {
+            color: #303943 !important;
+            line-height: 1.6 !important;
+        }
+        .stMarkdown small, .stCaption, [data-testid="stCaptionContainer"] {
+            color: #687583 !important;
+            font-size: 0.82rem !important;
         }
 
         /* Monospace Elements */
@@ -162,32 +243,13 @@ def _apply_custom_styling() -> None:
             font-family: 'JetBrains Mono', ui-monospace, monospace !important;
         }
         code {
-            background: rgba(99, 102, 241, 0.1) !important;
-            color: #a5b4fc !important;
-            border: 1px solid rgba(99, 102, 241, 0.22) !important;
-            padding: 0.12rem 0.35rem !important;
+            background: #E5F1FC !important;
+            color: #1D4ED8 !important;
+            border: 1px solid #D5E2EF !important;
+            padding: 0.12rem 0.38rem !important;
             border-radius: 4px !important;
-            font-size: 0.82em !important;
+            font-size: 0.84em !important;
             white-space: nowrap !important;
-        }
-
-        /* 3. Sidebar Shell */
-        [data-testid="stSidebar"] {
-            background-color: #0b101c !important;
-            border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
-            padding-top: 1rem !important;
-        }
-        [data-testid="stSidebar"] hr {
-            border-color: rgba(255, 255, 255, 0.07) !important;
-            margin: 1.25rem 0 !important;
-        }
-        .sidebar-section-title {
-            font-size: 0.72rem !important;
-            font-weight: 700 !important;
-            letter-spacing: 0.08em !important;
-            text-transform: uppercase !important;
-            color: #64748b !important;
-            margin-bottom: 0.85rem !important;
         }
 
         /* 4. Product Header Banner */
@@ -196,36 +258,39 @@ def _apply_custom_styling() -> None:
             align-items: center;
             justify-content: space-between;
             padding: 0 0 1.25rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid #D5E2EF;
             margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
         }
         .idx-brand {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.85rem;
         }
         .idx-logo-badge {
-            width: 34px;
-            height: 34px;
-            background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
-            border-radius: 8px;
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #3986D9 0%, #2563EB 100%) !important;
+            border-radius: 9px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.15rem;
-            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+            font-size: 1.2rem;
+            color: #FFFFFF !important;
+            box-shadow: 0 2px 10px rgba(57, 134, 217, 0.28);
         }
         .idx-title {
-            font-size: 1.35rem;
+            font-size: 1.4rem;
             font-weight: 700;
             letter-spacing: -0.03em;
-            color: #ffffff;
+            color: #303943 !important;
             margin: 0;
             line-height: 1.2;
         }
         .idx-tagline {
             font-size: 0.82rem;
-            color: #64748b;
+            color: #687583 !important;
             margin: 0;
             line-height: 1.3;
         }
@@ -233,119 +298,126 @@ def _apply_custom_styling() -> None:
             display: inline-flex;
             align-items: center;
             gap: 0.45rem;
-            padding: 0.3rem 0.7rem;
-            background: rgba(16, 185, 129, 0.08);
-            border: 1px solid rgba(16, 185, 129, 0.22);
+            padding: 0.35rem 0.75rem;
+            background: #ECFDF5 !important;
+            border: 1px solid #A7F3D0 !important;
             border-radius: 9999px;
             font-size: 0.76rem;
-            font-weight: 500;
-            color: #34d399;
+            font-weight: 600;
+            color: #047857 !important;
             font-family: 'JetBrains Mono', monospace;
         }
         .idx-status-dot {
-            width: 6px;
-            height: 6px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
-            background: #10b981;
-            box-shadow: 0 0 8px #10b981;
+            background: #10B981 !important;
+            box-shadow: 0 0 6px #10B981;
         }
         .idx-status-pill-amber {
             display: inline-flex;
             align-items: center;
             gap: 0.45rem;
-            padding: 0.3rem 0.7rem;
-            background: rgba(245, 158, 11, 0.08);
-            border: 1px solid rgba(245, 158, 11, 0.22);
+            padding: 0.35rem 0.75rem;
+            background: #FFFBEB !important;
+            border: 1px solid #FDE68A !important;
             border-radius: 9999px;
             font-size: 0.76rem;
-            font-weight: 500;
-            color: #fbbf24;
+            font-weight: 600;
+            color: #B45309 !important;
             font-family: 'JetBrains Mono', monospace;
         }
         .idx-status-dot-amber {
-            width: 6px;
-            height: 6px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
-            background: #f59e0b;
-            box-shadow: 0 0 8px #f59e0b;
+            background: #F59E0B !important;
+            box-shadow: 0 0 6px #F59E0B;
         }
 
-        /* 5. Navigation Tabs - Spacious Modern Pill Style */
+        /* 5. Navigation Tabs - Scientific Light Pill Design */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 0.6rem !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+            gap: 0.5rem !important;
+            border-bottom: 1px solid #D5E2EF !important;
             padding: 0 0 10px 0 !important;
             background: transparent !important;
-            margin-bottom: 2rem !important;
+            margin-bottom: 1.75rem !important;
             overflow-x: auto !important;
             flex-wrap: nowrap !important;
         }
-        .stTabs [data-baseweb="tab-highlight"] {
+        .stTabs [data-baseweb="tab-highlight"],
+        .stTabs [data-baseweb="tab-border"] {
             display: none !important;
         }
         .stTabs [data-baseweb="tab"] {
-            font-family: 'Poppins', sans-serif !important;
+            font-family: 'Inter', sans-serif !important;
             font-size: 0.88rem !important;
             font-weight: 500 !important;
-            padding: 0.6rem 1.35rem !important;
+            padding: 0.55rem 1.25rem !important;
             border-radius: 8px !important;
-            color: #94a3b8 !important;
-            background: rgba(255, 255, 255, 0.03) !important;
-            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            color: #687583 !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
             transition: all 0.15s ease-in-out !important;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
         }
         .stTabs [data-baseweb="tab"]:hover {
-            color: #f8fafc !important;
-            background-color: rgba(255, 255, 255, 0.08) !important;
-            border-color: rgba(255, 255, 255, 0.18) !important;
+            color: #303943 !important;
+            background-color: #E5F1FC !important;
+            background: #E5F1FC !important;
+            border-color: #CBD5E1 !important;
         }
         .stTabs [aria-selected="true"] {
-            background: rgba(99, 102, 241, 0.18) !important;
-            color: #ffffff !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            color: #3986D9 !important;
             font-weight: 600 !important;
-            border: 1px solid rgba(99, 102, 241, 0.45) !important;
-            box-shadow: 0 2px 14px rgba(99, 102, 241, 0.22) !important;
+            border: 1px solid #3986D9 !important;
+            border-bottom: 2px solid #3986D9 !important;
+            box-shadow: 0 2px 6px rgba(57, 134, 217, 0.12) !important;
         }
 
-        /* 6. Dense Technical Metric Cards */
+        /* 6. Technical Metric Cards */
         [data-testid="stMetric"] {
-            background: #0e1424 !important;
-            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
             border-radius: 10px !important;
             padding: 1rem 1.25rem !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03) !important;
         }
-        [data-testid="stMetricLabel"] {
-            font-family: 'Poppins', sans-serif !important;
+        [data-testid="stMetricLabel"] p, [data-testid="stMetricLabel"] {
+            font-family: 'Inter', sans-serif !important;
             font-size: 0.74rem !important;
-            font-weight: 500 !important;
+            font-weight: 600 !important;
             text-transform: uppercase !important;
             letter-spacing: 0.05em !important;
-            color: #64748b !important;
+            color: #687583 !important;
         }
-        [data-testid="stMetricValue"] {
+        [data-testid="stMetricValue"] div, [data-testid="stMetricValue"] {
             font-family: 'JetBrains Mono', monospace !important;
             font-size: 1.35rem !important;
-            font-weight: 600 !important;
-            color: #f8fafc !important;
+            font-weight: 700 !important;
+            color: #303943 !important;
             letter-spacing: -0.02em !important;
         }
 
         /* 7. Structured Technical Cards */
         .idx-card {
-            background: #0e1424;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            padding: 1.35rem 1.5rem;
-            margin-bottom: 1.25rem;
-            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
-            transition: all 0.2s ease;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
+            border-radius: 12px !important;
+            padding: 1.35rem 1.5rem !important;
+            margin-bottom: 1.25rem !important;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03) !important;
+            transition: all 0.2s ease !important;
         }
         .idx-card:hover {
-            border-color: rgba(99, 102, 241, 0.35);
-            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+            border-color: #3986D9 !important;
+            box-shadow: 0 4px 16px rgba(57, 134, 217, 0.09) !important;
         }
         .idx-card-header {
             display: flex;
@@ -354,24 +426,25 @@ def _apply_custom_styling() -> None:
             margin-bottom: 0.5rem;
         }
         .idx-card-title {
-            font-size: 0.96rem !important;
+            font-size: 0.98rem !important;
             font-weight: 600 !important;
-            color: #f8fafc !important;
+            color: #303943 !important;
             margin: 0 !important;
         }
         .idx-card-desc {
-            font-size: 0.84rem !important;
-            color: #94a3b8 !important;
+            font-size: 0.85rem !important;
+            color: #687583 !important;
             line-height: 1.6 !important;
             margin: 0 0 0.75rem 0 !important;
         }
         .idx-card-meta {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.74rem;
-            color: #64748b;
+            font-size: 0.75rem;
+            color: #495460 !important;
             display: flex;
             align-items: center;
             gap: 1rem;
+            flex-wrap: wrap;
         }
 
         /* Pipeline Flow Grid (Multi-Stage Architecture Map) */
@@ -381,143 +454,273 @@ def _apply_custom_styling() -> None:
             gap: 0.6rem;
             margin-bottom: 2rem;
             overflow-x: auto;
-            padding: 0.2rem 0;
+            padding: 0.3rem 0;
         }
         .idx-step-card {
-            background: #0d1322;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            padding: 0.8rem 1.1rem;
-            min-width: 155px;
-            flex: 1;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
+            border-radius: 8px !important;
+            padding: 0.8rem 1.1rem !important;
+            min-width: 155px !important;
+            flex: 1 !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
         }
         .idx-step-card-active {
-            border-color: rgba(16, 185, 129, 0.35);
-            background: rgba(16, 185, 129, 0.04);
+            border-color: #3986D9 !important;
+            background-color: #E5F1FC !important;
+            background: #E5F1FC !important;
         }
         .idx-step-num {
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.68rem;
-            font-weight: 600;
-            color: #6366f1;
+            font-weight: 700;
+            color: #3986D9 !important;
             letter-spacing: 0.06em;
             margin-bottom: 0.2rem;
         }
         .idx-step-name {
             font-family: 'Montserrat', sans-serif;
-            font-size: 0.84rem;
+            font-size: 0.85rem;
             font-weight: 600;
-            color: #f8fafc;
+            color: #303943 !important;
             white-space: nowrap;
             margin-bottom: 0.15rem;
         }
         .idx-step-tech {
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.72rem;
-            color: #94a3b8;
+            color: #687583 !important;
             white-space: nowrap;
         }
         .idx-step-arrow {
-            color: #475569;
+            color: #94A3B8 !important;
             font-size: 1.1rem;
             font-weight: 600;
             flex-shrink: 0;
         }
 
-        /* 8. Modern Buttons (Solid Indigo / Minimal Border) */
-        .stButton > button {
+        /* 8. Sliders */
+        [data-baseweb="slider"] div[class*="StyledTrack"],
+        [data-baseweb="slider"] div[class*="track"] {
+            background-color: #D5E2EF !important;
+            background: #D5E2EF !important;
+        }
+        [data-baseweb="slider"] [role="slider"] {
+            background-color: #3986D9 !important;
+            background: #3986D9 !important;
+            border: 2px solid #FFFFFF !important;
+            box-shadow: 0 1px 4px rgba(57, 134, 217, 0.4) !important;
+        }
+        [data-baseweb="slider"] div[data-testid="stThumbValue"] {
+            color: #3986D9 !important;
+            font-weight: 700 !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+        [data-testid="stSlider"] [data-testid="stWidgetLabel"] p {
+            color: #303943 !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stTickBar"] span {
+            color: #687583 !important;
+        }
+
+        /* 9. Modern Buttons */
+        .stButton > button,
+        [data-testid="baseButton-secondary"],
+        [data-testid="baseButton-primary"] {
             font-family: 'Inter', sans-serif !important;
             font-weight: 500 !important;
-            font-size: 0.84rem !important;
+            font-size: 0.85rem !important;
             border-radius: 6px !important;
             letter-spacing: -0.01em !important;
-            background-color: #1e263c !important;
-            color: #f8fafc !important;
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            color: #303943 !important;
+            border: 1px solid #D5E2EF !important;
             padding: 0.45rem 0.95rem !important;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
             transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
-        .stButton > button:hover {
-            background-color: #263352 !important;
-            border-color: rgba(99, 102, 241, 0.4) !important;
-            color: #ffffff !important;
+        .stButton > button:hover,
+        [data-testid="baseButton-secondary"]:hover {
+            background-color: #E5F1FC !important;
+            background: #E5F1FC !important;
+            border-color: #3986D9 !important;
+            color: #3986D9 !important;
             transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(57, 134, 217, 0.12) !important;
         }
         .stButton > button:active {
             transform: translateY(0);
         }
 
-        /* 9. Form Inputs */
-        .stTextInput input, .stSelectbox [data-baseweb="select"], .stNumberInput input {
+        /* 10. Form Inputs & Number Inputs */
+        [data-testid="stNumberInput"] input,
+        .stTextInput input,
+        .stSelectbox [data-baseweb="select"],
+        .stSelectbox [data-baseweb="select"] > div,
+        [data-baseweb="input"],
+        [data-baseweb="input"] input,
+        [data-baseweb="base-input"] {
             font-family: 'Inter', sans-serif !important;
             border-radius: 6px !important;
-            background: #0e1424 !important;
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            color: #f8fafc !important;
-            font-size: 0.85rem !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
+            color: #303943 !important;
+            font-size: 0.86rem !important;
         }
-        .stTextInput input:focus, .stSelectbox [data-baseweb="select"]:focus {
-            border-color: #6366f1 !important;
-            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+        [data-testid="stNumberInput"] button,
+        [data-testid="stNumberInputStepDown"],
+        [data-testid="stNumberInputStepUp"] {
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            color: #303943 !important;
+            border: 1px solid #D5E2EF !important;
+        }
+        [data-testid="stNumberInput"] button:hover {
+            background-color: #E5F1FC !important;
+            color: #3986D9 !important;
+        }
+        .stTextInput input:focus, .stSelectbox [data-baseweb="select"]:focus, .stNumberInput input:focus {
+            border-color: #3986D9 !important;
+            box-shadow: 0 0 0 2px rgba(57, 134, 217, 0.2) !important;
         }
 
-        /* 10. Badges & Status Pills */
-        .badge-indigo {
+        /* 11. Badges & Status Pills */
+        .badge-indigo, .badge-blue {
             display: inline-flex;
             align-items: center;
-            background: rgba(99, 102, 241, 0.12);
-            color: #a5b4fc;
-            border: 1px solid rgba(99, 102, 241, 0.26);
-            padding: 0.15rem 0.45rem;
+            background: #E0EEFD !important;
+            color: #1D4ED8 !important;
+            border: 1px solid #BFDBFE !important;
+            padding: 0.15rem 0.5rem;
             border-radius: 4px;
             font-size: 0.74rem;
-            font-weight: 500;
+            font-weight: 600;
             font-family: 'JetBrains Mono', monospace;
         }
         .badge-emerald {
             display: inline-flex;
             align-items: center;
-            background: rgba(16, 185, 129, 0.12);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.26);
-            padding: 0.15rem 0.45rem;
+            background: #ECFDF5 !important;
+            color: #047857 !important;
+            border: 1px solid #A7F3D0 !important;
+            padding: 0.15rem 0.5rem;
             border-radius: 4px;
             font-size: 0.74rem;
-            font-weight: 500;
+            font-weight: 600;
             font-family: 'JetBrains Mono', monospace;
         }
         .badge-amber {
             display: inline-flex;
             align-items: center;
-            background: rgba(245, 158, 11, 0.12);
-            color: #fbbf24;
-            border: 1px solid rgba(245, 158, 11, 0.26);
-            padding: 0.15rem 0.45rem;
+            background: #FFFBEB !important;
+            color: #B45309 !important;
+            border: 1px solid #FDE68A !important;
+            padding: 0.15rem 0.5rem;
             border-radius: 4px;
             font-size: 0.74rem;
-            font-weight: 500;
+            font-weight: 600;
             font-family: 'JetBrains Mono', monospace;
         }
 
         /* Callout / Disclaimer */
         .idx-callout {
-            background: rgba(99, 102, 241, 0.06);
-            border-left: 2px solid #6366f1;
-            padding: 0.75rem 1rem;
-            font-size: 0.8rem;
-            color: #cbd5e1;
-            border-radius: 0 6px 6px 0;
-            margin-bottom: 1rem;
-            line-height: 1.5;
+            background-color: #E5F1FC !important;
+            background: #E5F1FC !important;
+            border-left: 3px solid #3986D9 !important;
+            padding: 0.85rem 1.15rem !important;
+            font-size: 0.83rem !important;
+            color: #303943 !important;
+            border-radius: 0 8px 8px 0 !important;
+            margin-bottom: 1.15rem !important;
+            line-height: 1.6 !important;
+        }
+        .idx-callout strong {
+            color: #1E293B !important;
         }
 
         /* Dataframe styling */
         [data-testid="stDataFrame"] {
-            border: 1px solid rgba(255, 255, 255, 0.08) !important;
-            border-radius: 6px !important;
+            border: 1px solid #D5E2EF !important;
+            border-radius: 8px !important;
             overflow: hidden !important;
-            background: #0d1322 !important;
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+        }
+
+        /* Expanders */
+        [data-testid="stExpander"] {
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            border: 1px solid #D5E2EF !important;
+            border-radius: 8px !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+        }
+        [data-testid="stExpander"] summary {
+            font-weight: 600 !important;
+            color: #303943 !important;
+        }
+        [data-testid="stExpanderDetails"] {
+            background-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+            color: #303943 !important;
+        }
+
+        /* Engineering Footer */
+        .idx-footer {
+            margin-top: 3.5rem;
+            padding-top: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-top: 1px solid #D5E2EF;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.80rem;
+            color: #687583;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .idx-footer-brand {
+            font-weight: 600;
+            color: #303943 !important;
+        }
+        .idx-footer a {
+            color: #3986D9 !important;
+            text-decoration: none !important;
+            font-weight: 500;
+        }
+        .idx-footer a:hover {
+            text-decoration: underline !important;
+        }
+
+        /* Responsive Mobile Layout */
+        @media (max-width: 768px) {
+            .idx-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.75rem;
+            }
+            .idx-pipeline-grid {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .idx-step-arrow {
+                transform: rotate(90deg);
+                text-align: center;
+                margin: -0.25rem 0;
+            }
+            .idx-card {
+                padding: 1rem !important;
+            }
+            .idx-footer {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
         }
         </style>
         """,
@@ -678,12 +881,12 @@ def main() -> None:
         ds_curr: LabDataset = st.session_state.dataset
         st.markdown(
             f"""
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: #94a3b8; line-height: 1.7; background: #080c16; padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
-                <div>Base Vectors: <span style="color:#f8fafc; font-weight:600;">{ds_curr.N}</span></div>
-                <div>Queries: <span style="color:#f8fafc; font-weight:600;">{ds_curr.Q}</span></div>
-                <div>Dimension: <span style="color:#f8fafc; font-weight:600;">{ds_curr.d}-D float32</span></div>
-                <div>Clusters: <span style="color:#f8fafc; font-weight:600;">{ds_curr.n_clusters}</span></div>
-                <div>ID Range: <span style="color:#f8fafc; font-weight:600;">[{ds_curr.base_ids[0]} ... {ds_curr.base_ids[-1]}]</span></div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: #687583; line-height: 1.7; background: #FFFFFF; padding: 0.85rem; border-radius: 8px; border: 1px solid #D5E2EF; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                <div>Base Vectors: <span style="color:#303943; font-weight:600;">{ds_curr.N}</span></div>
+                <div>Queries: <span style="color:#303943; font-weight:600;">{ds_curr.Q}</span></div>
+                <div>Dimension: <span style="color:#303943; font-weight:600;">{ds_curr.d}-D float32</span></div>
+                <div>Clusters: <span style="color:#303943; font-weight:600;">{ds_curr.n_clusters}</span></div>
+                <div>ID Range: <span style="color:#303943; font-weight:600;">[{ds_curr.base_ids[0]} ... {ds_curr.base_ids[-1]}]</span></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -751,9 +954,9 @@ def main() -> None:
                 </div>
                 <div class="idx-step-arrow">→</div>
                 <div class="idx-step-card idx-step-card-active">
-                    <div class="idx-step-num" style="color: #10b981;">STAGE 05</div>
-                    <div class="idx-step-name" style="color: #34d399;">Search Result</div>
-                    <div class="idx-step-tech" style="color: #6ee7b7;">SearchResult(ids, dists)</div>
+                    <div class="idx-step-num">STAGE 05</div>
+                    <div class="idx-step-name">Search Result</div>
+                    <div class="idx-step-tech">SearchResult(ids, dists)</div>
                 </div>
             </div>
             <div class="idx-callout" style="margin-top: 1.25rem; margin-bottom: 1.5rem;">
@@ -1015,12 +1218,12 @@ def main() -> None:
                 })
             st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
 
-        # 2D PCA Visualization (Dark Technical Palette)
+        # 2D PCA Visualization (Scientific Light Palette)
         st.markdown("#### 2D Spatial Projection (PCA)")
         st.caption("Dimensionality reduction via deterministic SVD PCA. Illustrates candidate proximity and cluster assignment.")
 
-        fig, ax = plt.subplots(figsize=(9, 4.4), facecolor="#090d16")
-        ax.set_facecolor("#0d1322")
+        fig, ax = plt.subplots(figsize=(9, 4.4), facecolor="#F2F8FF")
+        ax.set_facecolor("#FFFFFF")
 
         # 1. Base vectors
         base_proj = ds.project_2d(ds.base)
@@ -1029,8 +1232,8 @@ def main() -> None:
             base_proj[:, 1],
             c=ds.cluster_labels,
             cmap="viridis",
-            alpha=0.55,
-            s=42,
+            alpha=0.65,
+            s=44,
             edgecolors="none",
             label="Database Vectors",
         )
@@ -1040,11 +1243,11 @@ def main() -> None:
         ax.scatter(
             q_proj[0],
             q_proj[1],
-            color="#f43f5e",
-            edgecolors="#ffffff",
+            color="#DC2626",
+            edgecolors="#FFFFFF",
             linewidths=1.5,
             marker="*",
-            s=240,
+            s=260,
             zorder=10,
             label="Query Vector",
         )
@@ -1058,9 +1261,9 @@ def main() -> None:
                     base_proj[retrieved_indices, 0],
                     base_proj[retrieved_indices, 1],
                     facecolors="none",
-                    edgecolors="#38bdf8",
-                    s=170,
-                    linewidths=2.0,
+                    edgecolors="#3986D9",
+                    s=180,
+                    linewidths=2.2,
                     zorder=9,
                     label="Retrieved Neighbors",
                 )
@@ -1070,19 +1273,19 @@ def main() -> None:
                         (base_proj[r_idx, 0] + 0.05, base_proj[r_idx, 1] + 0.05),
                         fontsize=8.5,
                         fontweight="bold",
-                        color="#38bdf8",
+                        color="#1D4ED8",
                     )
 
-        ax.set_title(f"2D Projection: {selected_index_name} (Top-{k_val})", fontsize=10, fontweight="600", color="#f8fafc", pad=10)
-        ax.set_xlabel("PC 1", fontsize=8.5, color="#94a3b8")
-        ax.set_ylabel("PC 2", fontsize=8.5, color="#94a3b8")
-        ax.tick_params(colors="#94a3b8", labelsize=7.5)
+        ax.set_title(f"2D Projection: {selected_index_name} (Top-{k_val})", fontsize=10.5, fontweight="600", color="#303943", pad=10)
+        ax.set_xlabel("PC 1", fontsize=9, color="#495460")
+        ax.set_ylabel("PC 2", fontsize=9, color="#495460")
+        ax.tick_params(colors="#687583", labelsize=8)
         for spine in ax.spines.values():
-            spine.set_color((1.0, 1.0, 1.0, 0.12))
-        ax.grid(True, linestyle="--", alpha=0.15, color="#ffffff")
-        legend = ax.legend(loc="upper right", fontsize=7.5, facecolor="#0d1322", edgecolor=(1.0, 1.0, 1.0, 0.15))
+            spine.set_color("#D5E2EF")
+        ax.grid(True, linestyle="--", alpha=0.6, color="#E2E8F0")
+        legend = ax.legend(loc="upper right", fontsize=8, facecolor="#FFFFFF", edgecolor="#D5E2EF")
         for text in legend.get_texts():
-            text.set_color("#cbd5e1")
+            text.set_color("#303943")
         fig.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
@@ -1160,18 +1363,18 @@ def main() -> None:
             ]
             st.dataframe(pd.DataFrame(summary_table), use_container_width=True)
 
-            # Polished Dark Charts
+            # Polished Scientific Light Charts
             c_c1, c_c2 = st.columns(2)
             with c_c1:
                 st.markdown("#### Recall@k vs. Median Latency")
-                fig1, ax1 = plt.subplots(figsize=(6, 3.6), facecolor="#090d16")
-                ax1.set_facecolor("#0d1322")
+                fig1, ax1 = plt.subplots(figsize=(6, 3.6), facecolor="#F2F8FF")
+                ax1.set_facecolor("#FFFFFF")
 
                 fam_meta = {
-                    "Exact": {"color": "#10b981", "marker": "o", "label": "Exact (Flat / BLAS)"},
-                    "IVF-Flat": {"color": "#38bdf8", "marker": "s", "label": "IVF-Flat"},
-                    "IVF-PQ": {"color": "#f59e0b", "marker": "^", "label": "IVF-PQ"},
-                    "HNSW": {"color": "#a855f7", "marker": "D", "label": "HNSW"},
+                    "Exact": {"color": "#16A34A", "marker": "o", "label": "Exact (Flat / BLAS)"},
+                    "IVF-Flat": {"color": "#0284C7", "marker": "s", "label": "IVF-Flat"},
+                    "IVF-PQ": {"color": "#D97706", "marker": "^", "label": "IVF-PQ"},
+                    "HNSW": {"color": "#7C3AED", "marker": "D", "label": "HNSW"},
                 }
 
                 rendered_fams: set[str] = set()
@@ -1196,52 +1399,52 @@ def main() -> None:
                         marker=cfg["marker"],
                         s=95,
                         alpha=0.9,
-                        edgecolors="#ffffff",
-                        linewidths=1.0,
+                        edgecolors="#FFFFFF",
+                        linewidths=1.2,
                         label=plot_label,
                         zorder=5,
                     )
 
-                ax1.set_xlabel("Median Query Latency (ms)", fontsize=8.5, color="#94a3b8")
-                ax1.set_ylabel("Recall@k", fontsize=8.5, color="#94a3b8")
+                ax1.set_xlabel("Median Query Latency (ms)", fontsize=8.5, color="#495460")
+                ax1.set_ylabel("Recall@k", fontsize=8.5, color="#495460")
                 ax1.set_ylim(-0.05, 1.15)
-                ax1.tick_params(colors="#94a3b8", labelsize=7.5)
+                ax1.tick_params(colors="#687583", labelsize=7.5)
                 for spine in ax1.spines.values():
-                    spine.set_color((1.0, 1.0, 1.0, 0.12))
-                ax1.grid(True, linestyle="--", alpha=0.15, color="#ffffff")
-                ax1.legend(loc="lower right", fontsize=7.5, facecolor="#0d1322", edgecolor=(1.0, 1.0, 1.0, 0.15), labelcolor="#cbd5e1")
+                    spine.set_color("#D5E2EF")
+                ax1.grid(True, linestyle="--", alpha=0.6, color="#E2E8F0")
+                ax1.legend(loc="lower right", fontsize=7.5, facecolor="#FFFFFF", edgecolor="#D5E2EF", labelcolor="#303943")
                 fig1.tight_layout()
                 st.pyplot(fig1)
                 plt.close(fig1)
 
             with c_c2:
                 st.markdown("#### Candidate Evaluations per Query")
-                fig2, ax2 = plt.subplots(figsize=(6, 3.6), facecolor="#090d16")
-                ax2.set_facecolor("#0d1322")
+                fig2, ax2 = plt.subplots(figsize=(6, 3.6), facecolor="#F2F8FF")
+                ax2.set_facecolor("#FFFFFF")
                 names = [r.index_name for r in bench_data if r.distance_computations_per_query is not None]
                 dcs = [r.distance_computations_per_query for r in bench_data if r.distance_computations_per_query is not None]
 
                 bar_colors = []
                 for n in names:
                     if "Exact" in n:
-                        bar_colors.append("#10b981")
+                        bar_colors.append("#16A34A")
                     elif "IVF-Flat" in n:
-                        bar_colors.append("#38bdf8")
+                        bar_colors.append("#0284C7")
                     elif "IVF-PQ" in n:
-                        bar_colors.append("#f59e0b")
+                        bar_colors.append("#D97706")
                     else:
-                        bar_colors.append("#a855f7")
+                        bar_colors.append("#7C3AED")
 
                 y_pos = np.arange(len(names))
-                bars = ax2.barh(y_pos, dcs, color=bar_colors, alpha=0.85, height=0.62)
+                bars = ax2.barh(y_pos, dcs, color=bar_colors, alpha=0.9, height=0.60)
                 ax2.set_yticks(y_pos)
-                ax2.set_yticklabels(names, fontsize=7.5, color="#cbd5e1")
+                ax2.set_yticklabels(names, fontsize=7.5, color="#303943")
                 ax2.invert_yaxis()
-                ax2.set_xlabel("Mean Distance Operations / Query", fontsize=8.5, color="#94a3b8")
-                ax2.tick_params(colors="#94a3b8", labelsize=7.5)
+                ax2.set_xlabel("Mean Distance Operations / Query", fontsize=8.5, color="#495460")
+                ax2.tick_params(colors="#687583", labelsize=7.5)
                 for spine in ax2.spines.values():
-                    spine.set_color((1.0, 1.0, 1.0, 0.12))
-                ax2.grid(True, axis="x", linestyle="--", alpha=0.15, color="#ffffff")
+                    spine.set_color("#D5E2EF")
+                ax2.grid(True, axis="x", linestyle="--", alpha=0.6, color="#E2E8F0")
                 fig2.tight_layout()
                 st.pyplot(fig2)
                 plt.close(fig2)
@@ -1652,23 +1855,23 @@ def main() -> None:
             st.markdown(
                 """
                 <div class="idx-callout" style="margin-bottom: 1.5rem;">
-                    <h4 style="margin-top:0; color:#e2e8f0; font-size: 1.05rem;">⚠️ Semantic Text Search Unavailable in this Environment</h4>
-                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                    <h4 style="margin-top:0; color:#1E293B; font-size: 1.05rem;">⚠️ Semantic Text Search Unavailable in this Environment</h4>
+                    <p style="margin-bottom:0.6rem; color:#495460; font-size:0.9rem;">
                         Real semantic retrieval requires neural sentence embeddings (<code>sentence-transformers</code> and <code>PyTorch</code>).
                         These optional deep-learning packages are not installed in the current environment.
                     </p>
-                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                    <p style="margin-bottom:0.6rem; color:#495460; font-size:0.9rem;">
                         <strong>Why pseudo-random mock search is disabled:</strong><br/>
                         Indexora strictly avoids substituting pseudo-random or hash-derived vectors for semantic retrieval.
                         Random vectors lack semantic structure, and ranking them generates misleading similarity scores
                         and false ground-truth claims.
                     </p>
-                    <p style="margin-bottom:0.6rem; color:#94a3b8; font-size:0.9rem;">
+                    <p style="margin-bottom:0.6rem; color:#495460; font-size:0.9rem;">
                         <strong>To enable real semantic search locally:</strong><br/>
                         <code>pip install -e ".[semantic]"</code><br/>
                         <code>streamlit run src/indexora/ui.py</code>
                     </p>
-                    <p style="margin-bottom:0; color:#94a3b8; font-size:0.9rem;">
+                    <p style="margin-bottom:0; color:#495460; font-size:0.9rem;">
                         <strong>Core Engine Status:</strong><br/>
                         Tabs 1–4 (Overview & Concepts, Search Playground, Accuracy & Benchmarks, Mutations & Sandboxed Persistence)
                         remain 100% operational using pure Python and NumPy with zero deep-learning dependencies.
@@ -1826,13 +2029,13 @@ def main() -> None:
                                 <div>{match_badge}</div>
                             </div>
                             <div class="idx-card-meta" style="margin-bottom: 0.5rem;">
-                                <span>Category: <strong style="color: #cbd5e1;">{doc.category}</strong></span>
-                                <span>Cosine Sim: <strong style="color: #38bdf8;">{cos_sim:.4f}</strong></span>
-                                <span>Squared L2: <strong style="color: #cbd5e1;">{dist:.4f}</strong></span>
+                                <span>Category: <strong style="color: #303943;">{doc.category}</strong></span>
+                                <span>Cosine Sim: <strong style="color: #3986D9;">{cos_sim:.4f}</strong></span>
+                                <span>Squared L2: <strong style="color: #303943;">{dist:.4f}</strong></span>
                                 <span>Doc ID: <code>{doc.doc_id}</code></span>
                             </div>
-                            <p style="font-size: 0.86rem; color: #cbd5e1; margin-bottom: 0.5rem; line-height: 1.5;">"{doc.text}"</p>
-                            <div style="font-size: 0.76rem; color: #64748b;">
+                            <p style="font-size: 0.88rem; color: #303943; margin-bottom: 0.5rem; line-height: 1.5;">"{doc.text}"</p>
+                            <div style="font-size: 0.76rem; color: #687583;">
                                 Tags: {tags_html}
                             </div>
                         </div>
@@ -1848,6 +2051,26 @@ def main() -> None:
             """,
             unsafe_allow_html=True,
         )
+
+    # -------------------------------------------------------------------------
+    # Engineering Footer
+    # -------------------------------------------------------------------------
+    st.markdown(
+        """
+        <div class="idx-footer">
+            <div class="idx-footer-left">
+                <span class="idx-footer-brand">⚡ Indexora</span> — First-Principles Vector Search Engine & Interactive Architecture Lab
+            </div>
+            <div class="idx-footer-center">
+                <span>Pure Python & NumPy Core • Zero External Vector DB Dependencies</span>
+            </div>
+            <div class="idx-footer-right">
+                <span>Engineered by <strong>Shivansh</strong> • <a href="mailto:shivansh1.mitblr2024@learner.manipal.edu">shivansh1.mitblr2024@learner.manipal.edu</a></span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
