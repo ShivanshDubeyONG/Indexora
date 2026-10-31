@@ -6,7 +6,7 @@
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
 
-**[LIVE DEMO](https://indexora.streamlit.app/)**
+**[LIVE DEMO](https://indexora.onrender.com/)**
 
 ---
 
