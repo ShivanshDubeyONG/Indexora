@@ -6,7 +6,7 @@
 
 **A learning-first vector search engine built from scratch in Python and NumPy.**
 
-> **Live Interactive Lab:** Explore real-time vector retrieval, 2D PCA spatial maps, incremental mutations, and semantic search at **[https://indexora.streamlit.app/](https://indexora.streamlit.app/)**.
+**[LIVE DEMO](https://indexora.streamlit.app/)**
 
 ---
 
