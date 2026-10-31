@@ -53,24 +53,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* 1. Header Banner (Modeled directly after the screenshot) */}
+      {/* 1. Header Banner */}
       <div className="bg-surface-card border border-border rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
-        <div className="flex items-start gap-3.5">
-          {/* Rounded Coral Icon Container */}
-          <div className="w-11 h-11 rounded-lg bg-[#E05638] flex items-center justify-center text-white flex-shrink-0 shadow-sm mt-0.5">
-            <Gauge className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[11px] font-bold text-graphite-subtle tracking-wider uppercase block">
-              DASHBOARD
-            </span>
-            <h1 className="font-heading font-bold text-xl sm:text-2xl text-graphite-dark tracking-tight">
-              Vector Search Engine Executive Dashboard
-            </h1>
-            <p className="text-xs text-graphite-muted mt-0.5">
-              Real-time KPIs for nearest-neighbor retrieval, precision verification, and hardware throughput · Ground truth: Exact BLAS Oracle · Viewing local index
-            </p>
-          </div>
+        <div>
+          <span className="text-[11px] font-bold text-accent tracking-wider uppercase block">
+            DASHBOARD OVERVIEW
+          </span>
+          <h1 className="font-heading font-bold text-xl sm:text-2xl text-graphite-dark tracking-tight">
+            Vector Search Engine Executive Dashboard
+          </h1>
+          <p className="text-xs text-graphite-muted mt-0.5">
+            Real-time KPIs for nearest-neighbor retrieval, precision verification, and hardware throughput · Ground truth: Exact BLAS Oracle · Viewing local index
+          </p>
         </div>
 
         {/* Quick Actions */}

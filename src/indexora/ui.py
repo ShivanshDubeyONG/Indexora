@@ -2065,7 +2065,7 @@ def main() -> None:
                 <span>Pure Python & NumPy Core • Zero External Vector DB Dependencies</span>
             </div>
             <div class="idx-footer-right">
-                <span>Engineered by <strong>Shivansh</strong> • <a href="mailto:shivansh1.mitblr2024@learner.manipal.edu">shivansh1.mitblr2024@learner.manipal.edu</a></span>
+                <span>Engineered by <strong>Shivansh</strong> • Open-Source MIT License</span>
             </div>
         </div>
         """,

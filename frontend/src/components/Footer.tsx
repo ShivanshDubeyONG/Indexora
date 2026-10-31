@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, ShieldCheck, Mail, GitBranch, Cpu, Zap, Database } from 'lucide-react';
+import { Terminal, ShieldCheck, GitBranch, Cpu, Zap, Database } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
@@ -43,15 +43,11 @@ export const Footer: React.FC = () => {
           </p>
         </div>
 
-        {/* Right: Author & Contact */}
+        {/* Right: Links & License */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 text-graphite">
-          <a
-            href="mailto:shivansh1.mitblr2024@learner.manipal.edu"
-            className="inline-flex items-center gap-1.5 text-accent hover:underline text-xs"
-          >
-            <Mail className="w-3.5 h-3.5" />
-            <span>shivansh1.mitblr2024@learner.manipal.edu</span>
-          </a>
+          <span className="text-graphite-muted text-xs font-mono">
+            MIT Open-Source License
+          </span>
 
           <a
             href="https://github.com/ShivanshDubeyONG/Indexora"

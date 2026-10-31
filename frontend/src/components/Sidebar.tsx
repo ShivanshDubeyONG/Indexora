@@ -62,7 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 title={item.label}
                 className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer relative group ${
                   isActive
-                    ? 'bg-[#E05638] text-white shadow-md'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-900/30'
                     : 'text-slate-400 hover:text-white hover:bg-white/10'
                 }`}
               >

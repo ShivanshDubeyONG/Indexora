@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Shivansh Dubey", email = "shivansh1.mitblr2024@learner.manipal.edu" },
+    { name = "Shivansh Dubey" },
     { name = "Indexora Contributors" }
 ]
 dependencies = [
