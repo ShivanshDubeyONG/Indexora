@@ -149,7 +149,7 @@ The table below reproduces the exact recorded results from `results/sift100k_p66
 2. **IVF Throughput Speedup:** At $n_{\text{list}}=100, n_{\text{probe}}=1$, IVF-Flat achieves **1,534.6 QPS** (0.72ms median latency), representing a **$78.7\times$ speedup** over the Exact BLAS baseline at 52.9% Recall@10.
 3. **Balanced Operating Point:** At $n_{\text{list}}=100, n_{\text{probe}}=5$, IVF-Flat delivers **91.3% Recall@10** at **4.53ms median latency** (220.7 QPS), reducing distance computations by **$17.9\times$** (5,589 vs. 100,000 operations per query).
 4. **Near-Lossless Operating Point:** At $n_{\text{list}}=100, n_{\text{probe}}=20$, IVF-Flat achieves **99.8% Recall@10** at **17.75ms median latency**, evaluating only 21.5% of database vectors.
-5. **Transient CPU Contention Note:** As documented in ADR-0008, batch QPS at $n_{\text{list}}=50, n_{\text{probe}}=10$ dropped to 8.2 QPS due to OS-level background thread contention during that specific repeated run, whereas individual query latencies and distance operations scaled strictly monotonically.
+5. **Batch QPS Anomaly & Contention Hypothesis:** As documented in ADR-0008, batch QPS at $n_{\text{list}}=50, n_{\text{probe}}=10$ dropped to 8.2 QPS while individual query latencies and distance computations scaled strictly monotonically. Comparative baseline runs (`results/sift100k`) exhibited strictly monotonic throughput scaling (329.3 $\to$ 173.5 $\to$ 63.3 $\to$ 29.4 $\to$ 12.9 QPS), indicating that transient OS/CPU thread scheduling contention during that multi-minute batch execution is a plausible explanation, though without low-level kernel tracing it remains an empirical hypothesis rather than a conclusively proven root cause.
 
 ---
 

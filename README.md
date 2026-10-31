@@ -224,7 +224,7 @@ For complete mathematical derivations, latency sampling protocols, and cryptogra
 **Key Takeaways & Limitations:**
 - **Exact Scan Baseline & Chunking Context:** BLAS Exact achieves $3.15\times$ higher throughput (19.5 vs. 6.2 QPS) and $1.51\times$ lower p50 latency than the coordinate-difference reference oracle under default bounded chunking (`max_db_chunk=32768`). In an unconstrained batched matrix GEMM scan with precomputed norms, direct BLAS reaches ~375–750 QPS. The default chunking bounds peak intermediate memory allocations by falling back to sequential single-query block scans when $N > 32768$.
 - **IVF-Flat Speedup:** Compared to the default bounded BLAS exact baseline, IVF-Flat (`nlist=100, nprobe=1`) provides a $78.7\times$ throughput speedup (1,534.6 vs. 19.5 QPS) at Recall@10 = 0.5287. Probing $n_{\text{probe}}=10$ lists achieves Recall@10 = 0.9791 with a $6.0\times$ throughput speedup (116.8 vs. 19.5 QPS). On batched queries against unconstrained BLAS matrix multiplication, Python candidate gathering overhead reduces IVF's wall-clock advantage unless `nprobe` is small or $N \gg 10^5$.
-- **Monotonicity Note on Batch QPS:** In the Phase 6.6 sweep, individual sampled query latencies and distance computations were strictly monotonic ($p_{50}$ from 3.83 ms to 67.90 ms; distance operations from 2,276 to 40,973). The batch throughput at $n_{\text{list}}=50, n_{\text{probe}}=10$ (8.2 QPS vs. 16.4 QPS at $n_{\text{probe}}=20$) reflects transient CPU thread contention during that specific repeated batch run, whereas the earlier baseline run in `results/sift100k` was strictly monotonic (329.3 $\to$ 173.5 $\to$ 63.3 $\to$ 29.4 $\to$ 12.9 QPS).
+- **Monotonicity Note on Batch QPS:** In the Phase 6.6 sweep, individual sampled query latencies and distance computations were strictly monotonic ($p_{50}$ from 3.83 ms to 67.90 ms; distance operations from 2,276 to 40,973). The batch throughput at $n_{\text{list}}=50, n_{\text{probe}}=10$ (8.2 QPS vs. 16.4 QPS at $n_{\text{probe}}=20$) is plausibly attributed to transient OS/CPU thread scheduling contention during that specific repeated full-batch run (supported by comparative runs such as `results/sift100k` where batch throughput scaled strictly monotonically: 329.3 $\to$ 173.5 $\to$ 63.3 $\to$ 29.4 $\to$ 12.9 QPS), though system-level kernel telemetry was not recorded to definitively confirm it as the sole factor.
 - **Build-Time Acceleration:** Vectorized BLAS cluster assignments reduced K-means index build time for $n_{\text{list}}=100$ from $\approx 18$ minutes to 22.8 seconds ($\approx 47\times$ faster).
 - **Limitations:** Measurements reflect single-process NumPy execution on CPU with $N=100,000$ and $Q=1,000$ vectors; results do not extrapolate to different vector distributions, hardware, or multi-threaded C++/GPU implementations.
 
@@ -505,12 +505,14 @@ Explore the entire Indexora engine from first principles in 4 quick steps:
 ## Documentation & Deep Dives
 
 - **[`docs/BENCHMARK_METHODOLOGY.md`](docs/BENCHMARK_METHODOLOGY.md):** Rigorous benchmarking methodology, latency sampling protocols, hardware environment specifications, and Texmex SIFT-100k provenance.
-- **[`docs/architecture.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/architecture.md):** Comprehensive technical architecture, mathematical foundations, data structures, and trade-off disclosures.
-- **[`docs/interview_prep.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/interview_prep.md):** 16 in-depth technical interview questions, rigorous answers, and live demonstration script.
-- **[`docs/DEMO_WALKTHROUGH.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview demonstration guide.
-- **[`docs/FINAL_AUDIT_REPORT.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/FINAL_AUDIT_REPORT.md):** Comprehensive project audit, security hardening, and release readiness verification.
-- **[`docs/RELEASE_NOTES_v1.0.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/RELEASE_NOTES_v1.0.md):** v1.0 release notes, architecture breakdown, and verified benchmark metrics.
-- **[`docs/decisions.md`](file:///c:/Users/Shivansh/Desktop/Indexora/docs/decisions.md):** Architecture Decision Records (ADRs 0001 through 0010).
+- **[`docs/FINAL_ENGINEERING_AUDIT.md`](docs/FINAL_ENGINEERING_AUDIT.md):** Independent post-v1.0 engineering audit verifying correctness, security boundaries, and reproducibility.
+- **[`docs/architecture.md`](docs/architecture.md):** Comprehensive technical architecture, mathematical foundations, data structures, and trade-off disclosures.
+- **[`docs/interview_prep.md`](docs/interview_prep.md):** 16 in-depth technical interview questions, rigorous answers, and live demonstration script.
+- **[`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview demonstration guide.
+- **[`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md):** Comprehensive project audit, security hardening, and release readiness verification.
+- **[`docs/RELEASE_NOTES_v1.0.1.md`](docs/RELEASE_NOTES_v1.0.1.md):** v1.0.1 maintenance release notes covering security, UI correctness, and benchmark documentation polish.
+- **[`docs/RELEASE_NOTES_v1.0.md`](docs/RELEASE_NOTES_v1.0.md):** v1.0 release notes, architecture breakdown, and verified benchmark metrics.
+- **[`docs/decisions.md`](docs/decisions.md):** Architecture Decision Records (ADRs 0001 through 0010).
 - `plan/project srs.md`: Project Brief & Software Requirements Specification (SRS v3.0)
 - `plan/tech design.md`: Architecture, Data Model, Kernel Contracts & Experiments (v3.0)
 - `plan/implementation.md`: 14-phase acceptance-gated roadmap and ownership policy (v3.0)

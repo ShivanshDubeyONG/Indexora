@@ -253,9 +253,9 @@ states what is included. Tag v0.2 only when advertised scope is actually
 complete.
 
 *Status: Complete & Verified.* 190 tests passing.
-- **ProductQuantizer ([`src/indexora/pq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py)):** Subspace decomposition into $M$ orthogonal subvectors ($d_{\text{sub}} = d // M$), per-subspace codebook training via K-means, compact discrete encoding (`uint8` for $k_{\text{sub}} \le 256$, `uint16` for $k_{\text{sub}} \le 65536$), and vector reconstruction with MSE evaluation.
+- **ProductQuantizer ([`src/indexora/pq.py`](src/indexora/pq.py)):** Subspace decomposition into $M$ orthogonal subvectors ($d_{\text{sub}} = d // M$), per-subspace codebook training via K-means, compact discrete encoding (`uint8` for $k_{\text{sub}} \le 256$, `uint16` for $k_{\text{sub}} \le 65536$), and vector reconstruction with MSE evaluation.
 - **Asymmetric Distance Computation (ADC):** Exact algebraic parity verified against direct distances to reconstructed vectors ($4.77 \times 10^{-7}$ floating-point tolerance). Vectorized table lookup scores candidates in $\approx 50$ microseconds per 1,000 vectors.
-- **IVFPQIndex ([`src/indexora/ivfpq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py)):** Inverted-file coarse clustering combined with PQ on coarse-centroid residuals ($x - c$) or raw vectors. Posting lists store only compact PQ codes and stable `int64` IDs (including negative IDs). Conforms to Indexora's frozen `SearchResult` contract.
+- **IVFPQIndex ([`src/indexora/ivfpq.py`](src/indexora/ivfpq.py)):** Inverted-file coarse clustering combined with PQ on coarse-centroid residuals ($x - c$) or raw vectors. Posting lists store only compact PQ codes and stable `int64` IDs (including negative IDs). Conforms to Indexora's frozen `SearchResult` contract.
 - **Memory Compression:** Verified $15.2\times$ memory compression on $N=10,000, d=128$ (0.33 MB vs 5.01 MB for IVF-Flat, reducing storage from 525.1 to 34.2 bytes/vector) with precise persistent array accounting.
 - **Benchmark Integration:** Added `--ivf-pq`, `--pq-m`, and `--pq-ksub` to `src/indexora/benchmark.py` and integrated trade-off curves into visualizer.
 
@@ -277,7 +277,7 @@ IDs; recall and latency are measured. Tag v0.3 only after tests and
 evidence.
 
 *Status: Complete & Verified.* 203 tests passing.
-- **HNSWIndex ([`src/indexora/hnsw.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py)):** Built hierarchical multi-layer proximity graph from scratch in Python and NumPy. Implemented exponential level sampling ($m_L = 1 / \ln(M)$), greedy layer descent, and bounded best-first beam search (`_search_layer_internal`) with candidate min-heaps and evaluation pool max-heaps.
+- **HNSWIndex ([`src/indexora/hnsw.py`](src/indexora/hnsw.py)):** Built hierarchical multi-layer proximity graph from scratch in Python and NumPy. Implemented exponential level sampling ($m_L = 1 / \ln(M)$), greedy layer descent, and bounded best-first beam search (`_search_layer_internal`) with candidate min-heaps and evaluation pool max-heaps.
 - **Algorithm 4 Neighbor Selection Heuristic:** Genuine heuristic selection enforcing spatial diversity and preventing clustering along lines-of-sight. Shrinkage checks discard candidates closer to existing neighbors than to base query, with fallback for pruned connections.
 - **Degree Bounds & Graph Invariants:** Enforced strict degree bounds ($M_0 = 2M$ at level 0, $M$ at levels $>0$). Graph integrity tests verify no self-loops, valid node indices across all levels, and correct entry-point tracking.
 - **ID & Search Result Contracts:** Full compatibility with Indexora's frozen `SearchResult` container. Supports arbitrary `int64` IDs (including negative IDs and `-1`), deterministic ascending `(distance, external_id)` tie-breaking, and exact distance evaluation tracking.

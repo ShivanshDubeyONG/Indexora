@@ -249,15 +249,15 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.1 IVF-Flat Search & Candidate Gathering
 - **Files & Symbols:**
-  - [`src/indexora/ivf.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py): [`IVFFlatIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L424), [`ivf_flat_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L806), [`InvertedList`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivf.py#L45).
-  - [`src/indexora/kmeans.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py): [`kmeans_plus_plus`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py#L110), [`kmeans`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kmeans.py#L220).
+  - [`src/indexora/ivf.py`](src/indexora/ivf.py): [`IVFFlatIndex.search`](src/indexora/ivf.py#L424), [`ivf_flat_search`](src/indexora/ivf.py#L806), [`InvertedList`](src/indexora/ivf.py#L45).
+  - [`src/indexora/kmeans.py`](src/indexora/kmeans.py): [`kmeans_plus_plus`](src/indexora/kmeans.py#L110), [`kmeans`](src/indexora/kmeans.py#L220).
 - **Data Flow:**
-  1. `queries` $\to$ coarse quantization against `self._centroids` via [`pairwise_squared_l2_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L163).
+  1. `queries` $\to$ coarse quantization against `self._centroids` via [`pairwise_squared_l2_blas`](src/indexora/kernels.py#L163).
   2. Coarse distances are sorted with `np.argsort(..., kind="stable")[:, :eff_nprobe]` to identify the closest posting lists.
   3. Candidate vectors and external IDs are extracted from `self._invlists[c]` and concatenated with `np.concatenate`.
   4. Candidate vectors pass through single-stage filtering (`filter_ids`).
   5. Candidate distances are computed via BLAS GEMV or reference coordinate differences.
-  6. [`select_top_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L50) applies `np.argpartition` and `np.lexsort` for deterministic tie-breaking.
+  6. [`select_top_k`](src/indexora/topk.py#L50) applies `np.argpartition` and `np.lexsort` for deterministic tie-breaking.
 - **Complexity:**
   - Coarse quantization: $O(n_{\text{list}} \cdot d)$.
   - Candidate scoring: $O\left(\frac{N}{n_{\text{list}}} \cdot n_{\text{probe}} \cdot d\right)$.
@@ -266,7 +266,7 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.2 HNSW Insertion & Multi-Layer Graph Search
 - **Files & Symbols:**
-  - [`src/indexora/hnsw.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py): [`HNSWIndex.add`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L470), [`HNSWIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L320), [`_search_layer`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L120), [`_select_neighbors_heuristic`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/hnsw.py#L190).
+  - [`src/indexora/hnsw.py`](src/indexora/hnsw.py): [`HNSWIndex.add`](src/indexora/hnsw.py#L470), [`HNSWIndex.search`](src/indexora/hnsw.py#L320), [`_search_layer`](src/indexora/hnsw.py#L120), [`_select_neighbors_heuristic`](src/indexora/hnsw.py#L190).
 - **Data Flow:**
   - **Search Path:**
     1. Traversal begins at `self._enter_point` at `self._max_level`.
@@ -286,7 +286,7 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.3 Product Quantization Training & Subspace Encoding
 - **Files & Symbols:**
-  - [`src/indexora/pq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py): [`ProductQuantizer.fit`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L110), [`ProductQuantizer.encode`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L210), [`ProductQuantizer.decode`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/pq.py#L260).
+  - [`src/indexora/pq.py`](src/indexora/pq.py): [`ProductQuantizer.fit`](src/indexora/pq.py#L110), [`ProductQuantizer.encode`](src/indexora/pq.py#L210), [`ProductQuantizer.decode`](src/indexora/pq.py#L260).
 - **Data Flow:**
   1. $d$-dimensional vector space is decomposed into $M$ orthogonal subspaces: $d_{\text{sub}} = d / M$.
   2. For each subspace $m \in [0, M-1]$, an independent $K$-means codebook of $k_{\text{sub}}=256$ centroids is trained.
@@ -299,7 +299,7 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.4 IVF-PQ Asymmetric Distance Computation (ADC)
 - **Files & Symbols:**
-  - [`src/indexora/ivfpq.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py): [`IVFPQIndex.search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L350), [`ivf_pq_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L650), [`_compute_query_lut`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/ivfpq.py#L200).
+  - [`src/indexora/ivfpq.py`](src/indexora/ivfpq.py): [`IVFPQIndex.search`](src/indexora/ivfpq.py#L350), [`ivf_pq_search`](src/indexora/ivfpq.py#L650), [`_compute_query_lut`](src/indexora/ivfpq.py#L200).
 - **Data Flow:**
   1. Coarse quantization selects $n_{\text{probe}}$ coarse centroids.
   2. For each probed centroid $C_k$, compute the residual query $r_q = q - C_k$.
@@ -314,9 +314,9 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.5 Exact Search, BLAS Kernels, and Deterministic Top-k
 - **Files & Symbols:**
-  - [`src/indexora/kernels.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py): [`pairwise_squared_l2_ref`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L60), [`pairwise_squared_l2_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py#L163).
-  - [`src/indexora/topk.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py): [`select_top_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L50), [`SearchResult`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py#L20).
-  - [`src/indexora/exact.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py): [`ExactFlatIndex`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L660), [`ExactBlasIndex`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L779), [`exact_search`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L149), [`exact_search_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/exact.py#L324).
+  - [`src/indexora/kernels.py`](src/indexora/kernels.py): [`pairwise_squared_l2_ref`](src/indexora/kernels.py#L60), [`pairwise_squared_l2_blas`](src/indexora/kernels.py#L163).
+  - [`src/indexora/topk.py`](src/indexora/topk.py): [`select_top_k`](src/indexora/topk.py#L50), [`SearchResult`](src/indexora/topk.py#L20).
+  - [`src/indexora/exact.py`](src/indexora/exact.py): [`ExactFlatIndex`](src/indexora/exact.py#L660), [`ExactBlasIndex`](src/indexora/exact.py#L779), [`exact_search`](src/indexora/exact.py#L149), [`exact_search_blas`](src/indexora/exact.py#L324).
 - **Core Operations:**
   - Reference kernel uses float64 coordinate accumulation to eliminate numerical cancellation error.
   - BLAS kernel evaluates $\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot x)$ with `np.dot` (GEMM).
@@ -324,8 +324,8 @@ When asked to walk through the codebase or explain specific algorithms, refer to
 
 ### 8.6 Evaluation Metrics & Benchmark Harness
 - **Files & Symbols:**
-  - [`src/indexora/eval.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py): [`compute_recall_at_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py#L20), [`compute_distance_aware_recall_at_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/eval.py#L70).
-  - [`src/indexora/benchmark.py`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py): [`_measure_per_query_latency`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L640), [`_measure_batch_throughput`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L675), [`run_benchmark`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/benchmark.py#L702).
+  - [`src/indexora/eval.py`](src/indexora/eval.py): [`compute_recall_at_k`](src/indexora/eval.py#L20), [`compute_distance_aware_recall_at_k`](src/indexora/eval.py#L70).
+  - [`src/indexora/benchmark.py`](src/indexora/benchmark.py): [`_measure_per_query_latency`](src/indexora/benchmark.py#L640), [`_measure_batch_throughput`](src/indexora/benchmark.py#L675), [`run_benchmark`](src/indexora/benchmark.py#L702).
 - **Core Methodology:**
   - Disentangles array padding (`mask=False`) from real negative IDs (`id=-1`).
   - Separates individual per-query latency percentiles ($p_{50}, p_{95}, p_{99}$) sampled over 500 queries from repeated full-batch throughput ($Q / t$).

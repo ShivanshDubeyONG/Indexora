@@ -50,10 +50,10 @@ flowchart TD
 Indexora adopts **squared Euclidean distance** ($d^2$) as its canonical distance metric:
 $$d^2(q, x) = \sum_{j=1}^d (q_j - x_j)^2$$
 
-In [`pairwise_squared_l2_ref`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py), coordinate differences are squared and accumulated using **64-bit float precision** before casting back to `float32`. This avoids catastrophic floating-point cancellation and serves as the numerical correctness oracle for all tests.
+In [`pairwise_squared_l2_ref`](src/indexora/kernels.py), coordinate differences are squared and accumulated using **64-bit float precision** before casting back to `float32`. This avoids catastrophic floating-point cancellation and serves as the numerical correctness oracle for all tests.
 
 ### 2.2 BLAS Acceleration Path
-While coordinate-by-coordinate differencing is numerically robust, its memory-bandwidth overhead is high. Indexora's accelerated path [`pairwise_squared_l2_blas`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/kernels.py) expands the binomial:
+While coordinate-by-coordinate differencing is numerically robust, its memory-bandwidth overhead is high. Indexora's accelerated path [`pairwise_squared_l2_blas`](src/indexora/kernels.py) expands the binomial:
 $$\|q - x\|^2 = \|q\|^2 + \|x\|^2 - 2(q \cdot x)$$
 
 - **Matrix Multiplication:** The cross-term $-2(q \cdot x)$ is computed via `np.dot(Q, X.T)`, delegating directly to optimized BLAS Level 3 GEMM (OpenBLAS/MKL).
@@ -81,11 +81,11 @@ This mathematical equivalence allows Indexora to natively power semantic text re
 Nearest-neighbor search requires reproducible tie-breaking. Indexora defines a strict lexicographic order on candidate pairs:
 $$\text{Candidate } A < \text{Candidate } B \iff (d_A < d_B) \lor (d_A = d_B \land \text{ID}_A < \text{ID}_B)$$
 
-In [`select_top_k`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py):
+In [`select_top_k`](src/indexora/topk.py):
 1. Distances are filtered for eligibility (ignoring tombstones and excluded IDs).
 2. `np.argpartition` identifies the unsorted top-$k$ candidates in $O(N)$ expected time.
 3. The $k$ candidates are sorted deterministically using `np.lexsort((candidate_ids, candidate_distances))`.
-4. Results are returned in an immutable [`SearchResult`](file:///c:/Users/Shivansh/Desktop/Indexora/src/indexora/topk.py) dataclass containing:
+4. Results are returned in an immutable [`SearchResult`](src/indexora/topk.py) dataclass containing:
    - `ids`: `(k,)` array of `int64` external IDs.
    - `distances`: `(k,)` array of `float32` squared L2 distances.
    - `mask`: `(k,)` boolean array distinguishing valid matches from empty/padding slots.
