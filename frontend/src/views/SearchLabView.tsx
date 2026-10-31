@@ -35,6 +35,8 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [executedK, setExecutedK] = useState(5);
+  const [hasInitialRun, setHasInitialRun] = useState(false);
 
   // Execution Feedback State
   const [evalTimestamp, setEvalTimestamp] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
   const runSearch = async (isManual = false) => {
     setLoading(true);
     setError(null);
+    const targetK = Number(k);
     const startTime = performance.now();
     try {
       let customVec: number[] | undefined = undefined;
@@ -65,7 +68,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
         index_type: indexType,
         query_id_index: useCustomVector ? undefined : queryIndex,
         custom_vector: customVec,
-        k: Number(k),
+        k: targetK,
         nprobe: Number(nprobe),
         ef_search: Number(efSearch),
         filter_mode: filterMode,
@@ -81,6 +84,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
       }
 
       setResult(res);
+      setExecutedK(targetK);
       setEvalTimestamp(new Date().toLocaleTimeString());
       setEvalFlash(true);
       setFlashKey((prev) => prev + 1);
@@ -92,11 +96,13 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
     }
   };
 
+  // Only run search initially on mount once dataset is loaded. Do NOT auto-execute when sliding values.
   useEffect(() => {
-    if (dataset) {
+    if (dataset && !hasInitialRun) {
       runSearch(false);
+      setHasInitialRun(true);
     }
-  }, [indexType, queryIndex, k, nprobe, efSearch, filterMode]);
+  }, [dataset, hasInitialRun]);
 
   // Current query vector for vector diff
   const currentQueryVec = dataset?.query_samples?.[queryIndex]?.vector || [];
@@ -201,7 +207,9 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="font-medium text-graphite-muted">Top-k Results</span>
-                <span className="font-mono font-bold text-accent">{k}</span>
+                <span className="font-mono font-bold text-accent">
+                  {k} {k !== executedK && <span className="text-[10px] text-graphite-subtle font-normal font-sans">(click Execute to apply)</span>}
+                </span>
               </div>
               <input
                 type="range"
@@ -415,7 +423,7 @@ export const SearchLabView: React.FC<SearchLabViewProps> = ({ dataset }) => {
                 </span>
               </div>
               <span className="text-xs font-mono px-2 py-0.5 rounded bg-surface-secondary text-graphite border border-border">
-                Top-{k}
+                Top-{result ? result.results.length : executedK}
               </span>
             </div>
 

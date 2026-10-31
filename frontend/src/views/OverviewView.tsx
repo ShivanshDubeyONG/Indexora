@@ -44,9 +44,6 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
   const currentRecall = recallScores[selectedRecallAlgo];
 
-  // Semicircular Gauge Needle Angle (-90 deg to +90 deg for 0% to 100%)
-  const needleAngle = -90 + (currentRecall.value / 100) * 180;
-
   return (
     <div className="space-y-6">
       {/* 1. Header Banner (Modeled directly after the screenshot) */}
@@ -84,15 +81,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       {/* 2. Main 2x2 Data Grid (Directly matching the screenshot layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {/* CARD 1: Semi-Circle Speedometer Accuracy Gauge */}
+        {/* CARD 1: Precision Recall Gauge (Clean Technical Engineering Meter) */}
         <div className="bg-surface-card border border-border rounded-xl p-6 shadow-sm flex flex-col justify-between transition-colors">
           <div className="flex items-center justify-between border-b border-border/70 pb-3">
             <div>
               <h2 className="font-heading font-bold text-base text-graphite-dark">
-                Retrieval Recall Accuracy (Recall@k)
+                Retrieval Precision (Recall@k)
               </h2>
               <p className="text-xs text-graphite-muted">
-                Evaluated against exhaustive float64 mathematical ground-truth oracle
+                Precision evaluated against float64 BLAS ground-truth reference
               </p>
             </div>
 
@@ -100,7 +97,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <select
               value={selectedRecallAlgo}
               onChange={(e) => setSelectedRecallAlgo(e.target.value as any)}
-              className="text-xs font-mono px-2 py-1 rounded border border-border bg-surface-subtle text-graphite focus:outline-none"
+              className="text-xs font-mono px-2.5 py-1.5 rounded-lg border border-border bg-surface-subtle text-graphite focus:outline-none focus:border-accent cursor-pointer"
             >
               <option value="exact">Exact BLAS (100%)</option>
               <option value="hnsw">HNSW Graph (98.4%)</option>
@@ -109,59 +106,85 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </select>
           </div>
 
-          {/* SVG Semicircular Speedometer Gauge */}
-          <div className="py-6 flex flex-col items-center justify-center">
-            <svg viewBox="0 0 280 150" className="w-full max-w-[280px]">
-              {/* Arc 1: Red (0% - 66%) */}
+          {/* Calibrated Precision Technical Arc */}
+          <div className="py-5 flex flex-col items-center justify-center">
+            <svg viewBox="0 0 260 140" className="w-full max-w-[260px]">
+              <defs>
+                <linearGradient id="precisionArcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#2563EB" />
+                  <stop offset="100%" stopColor="#38BDF8" />
+                </linearGradient>
+              </defs>
+
+              {/* Background Arc Track */}
               <path
-                d="M 30,130 A 110,110 0 0,1 100,35"
+                d="M 30,125 A 90,90 0 0,1 230,125"
                 fill="none"
-                stroke="#E05638"
-                strokeWidth="20"
-                strokeLinecap="round"
-              />
-              {/* Arc 2: Amber (66% - 85%) */}
-              <path
-                d="M 103,32 A 110,110 0 0,1 177,32"
-                fill="none"
-                stroke="#F7B84B"
-                strokeWidth="20"
-              />
-              {/* Arc 3: Cyan/Emerald (85% - 100%) */}
-              <path
-                d="M 180,35 A 110,110 0 0,1 250,130"
-                fill="none"
-                stroke="#0AB39C"
-                strokeWidth="20"
+                stroke="currentColor"
+                className="text-slate-200 dark:text-slate-700/60"
+                strokeWidth="12"
                 strokeLinecap="round"
               />
 
-              {/* Tick Labels */}
-              <text x="30" y="145" fontSize="11" fontFamily="Inter" fill="#718096" textAnchor="middle">0%</text>
-              <text x="140" y="24" fontSize="11" fontFamily="Inter" fill="#718096" textAnchor="middle">85%</text>
-              <text x="250" y="145" fontSize="11" fontFamily="Inter" fill="#718096" textAnchor="middle">100%</text>
+              {/* Calibrated Active Meter Arc */}
+              <path
+                d="M 30,125 A 90,90 0 0,1 230,125"
+                fill="none"
+                stroke="url(#precisionArcGrad)"
+                strokeWidth="12"
+                strokeLinecap="round"
+                strokeDasharray="282.74"
+                strokeDashoffset={282.74 * (1 - (currentRecall.value / 100))}
+                className="transition-all duration-500 ease-out"
+              />
 
-              {/* Gauge Needle */}
-              <g transform={`rotate(${needleAngle}, 140, 130)`}>
-                <line x1="140" y1="130" x2="140" y2="42" stroke="#1A202C" strokeWidth="3.5" strokeLinecap="round" />
-                <circle cx="140" cy="130" r="7" fill="#1A202C" />
-                <circle cx="140" cy="130" r="3" fill="#FFFFFF" />
-              </g>
+              {/* Calibration Tick Marks */}
+              {[0, 25, 50, 75, 100].map((tick) => {
+                const angle = Math.PI - (tick / 100) * Math.PI;
+                const rInner = 76;
+                const rOuter = 82;
+                const x1 = 130 + rInner * Math.cos(angle);
+                const y1 = 125 - rInner * Math.sin(angle);
+                const x2 = 130 + rOuter * Math.cos(angle);
+                const y2 = 125 - rOuter * Math.sin(angle);
+                return (
+                  <line
+                    key={tick}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="currentColor"
+                    className="text-slate-400 dark:text-slate-500"
+                    strokeWidth={tick === 0 || tick === 100 ? 1.5 : 1}
+                  />
+                );
+              })}
 
-              {/* Digital Readout */}
-              <text x="140" y="115" fontSize="20" fontWeight="bold" fontFamily="Inter" fill="#1A202C" textAnchor="middle">
+              {/* Percentage Ticks */}
+              <text x="30" y="139" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">0%</text>
+              <text x="130" y="32" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">50%</text>
+              <text x="230" y="139" fontSize="10" fontFamily="monospace" fill="#94A3B8" textAnchor="middle">100%</text>
+
+              {/* Digital Center Readout */}
+              <text x="130" y="105" fontSize="26" fontWeight="700" fontFamily="monospace" fill="currentColor" className="text-graphite-dark" textAnchor="middle">
                 {currentRecall.value.toFixed(1)}%
+              </text>
+              <text x="130" y="120" fontSize="10" fontFamily="Inter" fill="#94A3B8" textAnchor="middle">
+                RECALL@K
               </text>
             </svg>
 
-            <span className="text-xs text-graphite-muted text-center mt-2 max-w-sm">
+            <span className="text-xs text-graphite-muted text-center mt-2 max-w-sm px-2">
               {currentRecall.desc}
             </span>
           </div>
 
           <div className="pt-3 border-t border-border flex items-center justify-between text-[11px] text-graphite-muted font-mono">
-            <span>Source: Verified Ground Truth Oracle</span>
-            <span className="text-emerald-600 font-semibold">Strict Zero False Positives</span>
+            <span>Method: Exact BLAS Oracle</span>
+            <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Zero False Positives
+            </span>
           </div>
         </div>
 

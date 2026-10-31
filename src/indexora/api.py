@@ -671,10 +671,10 @@ def get_semantic_status() -> dict[str, Any]:
         "available": has_st,
         "model_name": DEFAULT_EMBEDDING_MODEL,
         "document_count": len(corpus_docs),
-        "categories": ["All Categories"] + categories,
+        "categories": categories,
         "corpus_sample": [
             {"doc_id": d.doc_id, "category": d.category, "title": d.title, "text": d.text, "tags": d.metadata.get("tags", [])}
-            for d in corpus_docs[:6]
+            for d in corpus_docs
         ],
     }
 

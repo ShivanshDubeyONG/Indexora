@@ -3,7 +3,7 @@ import { NavTabId } from './Navigation';
 import {
   Menu,
   Gauge,
-  Search,
+  FlaskConical,
   BarChart2,
   Layers,
   Database,
@@ -33,7 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems: Array<{ id: NavTabId; label: string; icon: React.ReactNode }> = [
     { id: 'overview', label: 'Dashboard Overview', icon: <Gauge className="w-5 h-5" /> },
-    { id: 'search', label: 'Search Lab', icon: <Search className="w-5 h-5" /> },
+    { id: 'search', label: 'Search Lab', icon: <FlaskConical className="w-5 h-5" /> },
     { id: 'benchmarks', label: 'Benchmark Studio', icon: <BarChart2 className="w-5 h-5" /> },
     { id: 'explorer', label: 'Vector Explorer', icon: <Layers className="w-5 h-5" /> },
     { id: 'management', label: 'Storage & Mutations', icon: <Database className="w-5 h-5" /> },

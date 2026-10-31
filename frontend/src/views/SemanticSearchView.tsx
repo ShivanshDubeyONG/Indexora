@@ -85,7 +85,8 @@ export const SemanticSearchView: React.FC = () => {
 
   // Filter corpus documents
   const filteredCorpus = status?.corpus_sample?.filter((doc) => {
-    const matchesTab = activeCorpusTab === 'all' || doc.category.toLowerCase() === activeCorpusTab.toLowerCase();
+    const isAll = activeCorpusTab === 'all' || activeCorpusTab.toLowerCase() === 'all categories';
+    const matchesTab = isAll || doc.category.toLowerCase() === activeCorpusTab.toLowerCase();
     const matchesSearch = !corpusSearchTerm.trim() ||
       doc.title.toLowerCase().includes(corpusSearchTerm.toLowerCase()) ||
       doc.text.toLowerCase().includes(corpusSearchTerm.toLowerCase()) ||
@@ -386,15 +387,15 @@ export const SemanticSearchView: React.FC = () => {
           <button
             onClick={() => setActiveCorpusTab('all')}
             className={`px-3 py-1.5 rounded-lg border transition-all cursor-pointer whitespace-nowrap ${
-              activeCorpusTab === 'all'
+              activeCorpusTab === 'all' || activeCorpusTab.toLowerCase() === 'all categories'
                 ? 'bg-accent text-white border-accent font-semibold shadow-sm'
                 : 'bg-surface-subtle hover:bg-surface-secondary text-graphite-muted hover:text-graphite border-border'
             }`}
           >
             All Categories ({status?.corpus_sample?.length || 25})
           </button>
-          {status?.categories?.map((cat) => {
-            const count = status.corpus_sample?.filter((d) => d.category === cat).length || 5;
+          {status?.categories?.filter((cat) => cat.toLowerCase() !== 'all categories').map((cat) => {
+            const count = status.corpus_sample?.filter((d) => d.category.toLowerCase() === cat.toLowerCase()).length || 0;
             const isActive = activeCorpusTab.toLowerCase() === cat.toLowerCase();
             return (
               <button
@@ -499,7 +500,9 @@ export const SemanticSearchView: React.FC = () => {
             })
           ) : (
             <div className="col-span-full p-8 text-center text-xs text-graphite-muted border border-dashed border-border rounded-xl">
-              No technical documents match "{corpusSearchTerm}" in {activeCorpusTab}.
+              {corpusSearchTerm
+                ? `No technical documents match "${corpusSearchTerm}"${activeCorpusTab !== 'all' ? ` in ${activeCorpusTab}` : ''}.`
+                : `No documents available${activeCorpusTab !== 'all' ? ` in ${activeCorpusTab}` : ''}.`}
             </div>
           )}
         </div>
