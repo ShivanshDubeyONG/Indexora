@@ -14,29 +14,43 @@
 
 The tables below present verified, reproducible benchmark measurements across Indexora's core index implementations evaluated on the standard **Texmex SIFT** dataset ($d=128$, $k=10$, squared Euclidean distance).
 
-### SIFT-100K Benchmark ($N=100,000$, $Q=1,000$, $d=128$)
+### 1. SIFT-100K Serving Benchmark ($N=100,000$, $Q=1,000$, $d=128$)
+*All rows below were recorded in a single standardized sequential evaluation suite on the same hardware environment (`results/sift100k_p66/` and `results/sift100k_ivfpq/`). Each row measures per-query response latency ($p_{50}$) and query throughput.*
 
-| Architecture | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Work per Query | Array Storage (MiB) | Memory Scaling Behavior |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Plain BLAS Scan** (Raw NumPy Reference) | Unconstrained GEMM | **1.0000** | ~2.10 ms | **474.8 QPS** | 100,000 ops | 48.83 MiB | Unbounded ($O(N \cdot Q)$ intermediate RAM) |
-| **Exact (BLAS)** (Chunked Implementation) | `max_db_chunk=32768` | **1.0000** | 16.53 ms | **280.1 QPS** | 100,000 ops | 48.83 MiB | Bounded by database chunk ($O(\text{chunk} \cdot Q_{\text{chunk}})$) |
-| **Exact (Reference)** (Oracle Loop) | Float64 coordinate loop | **1.0000** | 150.69 ms | 6.2 QPS | 100,000 ops | 48.83 MiB | Strict numerical reference oracle |
-| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=1$ | 0.5287 | **0.72 ms** | **1,534.6 QPS** | 1,213 ops | 48.88 MiB | Fast candidate pruning |
-| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=10$ | **0.9791** | 8.32 ms | 116.8 QPS | 10,928 ops | 48.88 MiB | High-recall operating point |
-| **IVF-Flat** | $n_{\text{list}}=100, n_{\text{probe}}=20$ | **0.9980** | 17.75 ms | 55.9 QPS | 21,481 ops | 48.88 MiB | Near-lossless recovery |
-| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=1$ | 0.4215 | 2.01 ms | **501.8 QPS** | 1,203 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
-| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=10$ | 0.6204 | 16.67 ms | 56.8 QPS | 10,723 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
-| **IVF-PQ** (Residual Codes) | $n_{\text{list}}=100, M=16, n_{\text{probe}}=20$ | **0.6236** | 33.39 ms | 35.5 QPS | 21,060 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+| Architecture | Source Artifact | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Throughput | Distance Work / Query | Array Storage | Memory Scaling Behavior |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Exact Reference** | `sift100k_p66` | Float64 coordinate loop | **1.0000** | 150.69 ms | 6.2 QPS | 100,000 ops | 48.83 MiB | Strict numerical reference oracle |
+| **Exact (BLAS)** | `sift100k_p66` | Level-3 GEMM (`ExactBlasIndex`) | **1.0000** | 99.74 ms | 19.5 QPS | 100,000 ops | 48.83 MiB | $5.1\times$ candidate speedup over reference loop |
+| **IVF-Flat** | `sift100k_p66` | $n_{\text{list}}=100, n_{\text{probe}}=1$ | 0.5287 | **0.72 ms** | **1,534.6 QPS** | 1,213 ops | 48.88 MiB | Fast candidate pruning |
+| **IVF-Flat** | `sift100k_p66` | $n_{\text{list}}=100, n_{\text{probe}}=10$ | **0.9791** | 8.32 ms | 116.8 QPS | 10,928 ops | 48.88 MiB | High-recall operating point |
+| **IVF-Flat** | `sift100k_p66` | $n_{\text{list}}=100, n_{\text{probe}}=20$ | **0.9980** | 17.75 ms | 55.9 QPS | 21,481 ops | 48.88 MiB | Near-lossless recovery |
+| **IVF-PQ** (Residual Codes) | `sift100k_ivfpq` | $n_{\text{list}}=100, M=16, n_{\text{probe}}=1$ | 0.4215 | 2.01 ms | **501.8 QPS** | 1,203 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+| **IVF-PQ** (Residual Codes) | `sift100k_ivfpq` | $n_{\text{list}}=100, M=16, n_{\text{probe}}=10$ | 0.6204 | 16.67 ms | 56.8 QPS | 10,723 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
+| **IVF-PQ** (Residual Codes) | `sift100k_ivfpq` | $n_{\text{list}}=100, M=16, n_{\text{probe}}=20$ | **0.6236** | 33.39 ms | 35.5 QPS | 21,060 LUT | **2.46 MiB** | **$19.8\times$ Array Storage Reduction** |
 
-### SIFT-10K Subset Benchmark ($N=10,000$, $Q=1,000$, $d=128$)
-*Note: Evaluated on the first 10,000 base vectors with exact subset ground truth to respect pure-Python graph-traversal interpreter constraints. Not directly comparable in QPS to 100K runs due to dataset scale differences.*
+---
 
-| Architecture | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Distance Ops / Query | Serialized Storage | Candidate Inspection |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=16$ | **0.9423** | 2.29 ms | 396.8 QPS | **374** | 7.48 MiB (est.) | Inspects only 3.7% of database |
-| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=32$ | **0.9730** | 3.57 ms | 276.1 QPS | **545** | 7.48 MiB (est.) | Inspects only 5.4% of database |
-| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=64$ | **0.9881** | 5.68 ms | 176.6 QPS | **815** | 7.48 MiB (est.) | Inspects only 8.1% of database |
-| **HNSW** (Proximity Graph) | $M=16, ef_c=64, ef_s=128$ | **0.9944** | 8.32 ms | 113.8 QPS | **1,215** | 7.48 MiB (est.) | Inspects only 12.1% of database |
+### 2. High-Throughput Full-Batch GEMM Regime ($Q=1,000$ Parallel Batching)
+*In batch serving workloads where all $Q=1,000$ queries can be evaluated simultaneously in parallel matrix operations ($Q \times X^T$), hardware Level-3 BLAS parallelism scales differently from interactive single-query evaluation:*
+
+| Batch Implementation | Execution Mode | Intermediate RAM | Batch QPS | Trade-off & Operational Guarantee |
+| :--- | :---: | :---: | :---: | :--- |
+| **Plain BLAS Scan** (NumPy Reference) | Unconstrained single GEMM | Unbounded ($O(N \cdot Q) \approx 400\text{ MB}$) | **474.8 QPS** | Peak SIMD saturation, but intermediate RAM explodes on large $Q$ |
+| **Exact (BLAS Chunked)** (`ExactBlasIndex`) | `max_db_chunk=32768, max_query_chunk=1024` | Bounded ($O(\text{chunk} \cdot Q_{\text{chunk}}) \approx 134.2\text{ MB}$) | **280.1 QPS** | Guaranteed bounded RAM allocation on arbitrary database size |
+| **IVF-Flat** ($n_{\text{probe}}=1$) | Inverted list partitioning | Bounded by partition size | **1,534.6 QPS** | **$3.2\times$ faster** than Plain BLAS on candidate pruning |
+| **IVF-Flat** ($n_{\text{probe}}=10$) | Python candidate gathering | Bounded by partition size | 116.8 QPS | Python interpreter slice overhead on full batches vs. native C BLAS |
+
+---
+
+### 3. SIFT-10K Subset Benchmark ($N=10,000$, $Q=1,000$, $d=128$)
+*Source: `results/sift10k_hnsw/`. Evaluated on the first 10,000 base vectors with exact subset ground truth to respect pure-Python graph-traversal interpreter constraints. Not directly comparable in QPS to 100K runs due to dataset scale differences.*
+
+| Architecture | Source Artifact | Parameter Configuration | Recall@10 | Per-Query $p_{50}$ | Batch Throughput | Distance Ops / Query | Serialized Storage | Candidate Inspection |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **HNSW** (Proximity Graph) | `sift10k_hnsw` | $M=16, ef_c=64, ef_s=16$ | **0.9423** | 2.29 ms | 396.8 QPS | **374** | 7.48 MiB (est.) | Inspects only 3.7% of database |
+| **HNSW** (Proximity Graph) | `sift10k_hnsw` | $M=16, ef_c=64, ef_s=32$ | **0.9730** | 3.57 ms | 276.1 QPS | **545** | 7.48 MiB (est.) | Inspects only 5.4% of database |
+| **HNSW** (Proximity Graph) | `sift10k_hnsw` | $M=16, ef_c=64, ef_s=64$ | **0.9881** | 5.68 ms | 176.6 QPS | **815** | 7.48 MiB (est.) | Inspects only 8.1% of database |
+| **HNSW** (Proximity Graph) | `sift10k_hnsw` | $M=16, ef_c=64, ef_s=128$ | **0.9944** | 8.32 ms | 113.8 QPS | **1,215** | 7.48 MiB (est.) | Inspects only 12.1% of database |
 
 <div align="center">
   <img src="results/sift100k_p66/recall_vs_latency.png" alt="SIFT-100k Recall vs Median Latency" width="750" />
