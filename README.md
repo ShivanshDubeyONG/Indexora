@@ -14,6 +14,9 @@
 
 The tables below present verified, reproducible benchmark measurements across Indexora's core index implementations evaluated on the standard **Texmex SIFT** dataset ($d=128$, $k=10$, squared Euclidean distance).
 
+<img width="1675" height="972" alt="image" src="https://github.com/user-attachments/assets/6e9cce93-2db3-448d-aed1-a306e624bcd5" />
+
+
 ### 1. SIFT-100K Serving Benchmark ($N=100,000$, $Q=1,000$, $d=128$)
 *All rows below were recorded in a single standardized sequential evaluation suite on the same hardware environment (`results/sift100k_p66/` and `results/sift100k_ivfpq/`). Each row measures per-query response latency ($p_{50}$) and query throughput.*
 
@@ -75,6 +78,9 @@ The tables below present verified, reproducible benchmark measurements across In
    - **Memory Qualification:** The reported 7.48 MiB is a **logical serialized-storage estimate** based on contiguous arrays ($4.88$ MiB vectors + $0.08$ MiB IDs + $2.52$ MiB 64-bit CSR graph edges). In-memory Python heap overhead (nested `list[list[int]]` pointer structures and Python integer objects) adds runtime overhead that cannot be isolated from total process RSS ($150.4$ MiB); therefore, 7.48 MiB is strictly documented as a serialized storage estimate. Query latency ($2.3$ to $8.3$ ms) is governed by Python bytecode dispatch overhead during graph traversal.
 
 ---
+
+<img width="1786" height="862" alt="image" src="https://github.com/user-attachments/assets/49cb22d6-c029-43a8-94ce-ac19b127a1a2" />
+
 
 ## Core Algorithms Implemented
 
