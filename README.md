@@ -207,6 +207,7 @@ print("Retrieved IDs:", result.ids)
 print("Squared L2 Distances:", result.distances)
 print("Cosine Similarities:", 1.0 - 0.5 * result.distances)
 ```
+<img width="1917" height="978" alt="image" src="https://github.com/user-attachments/assets/6031060c-1ef7-4081-875a-4d6b9743219d" />
 
 ---
 
