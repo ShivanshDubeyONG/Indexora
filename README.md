@@ -237,9 +237,4 @@ print("Cosine Similarities:", 1.0 - 0.5 * result.distances)
 - **[`docs/architecture.md`](docs/architecture.md):** Technical design reference and internal data structures.
 - **[`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md):** Step-by-step 2–3 minute technical interview walkthrough script.
 
----
 
-## License
-
-Indexora is released under the [MIT License](LICENSE).
-Copyright (c) 2026 Shivansh Dubey and Indexora Contributors.
